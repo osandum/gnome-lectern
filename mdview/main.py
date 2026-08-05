@@ -23,6 +23,13 @@ class MdViewApplication(Adw.Application):
         about_action.connect("activate", self._on_about)
         self.add_action(about_action)
 
+        # GTK4 windows already ship a built-in "window.close" action (just
+        # needs an accel); "quit" has no stock equivalent, so it needs an
+        # actual action wired to Gio.Application.quit().
+        quit_action = Gio.SimpleAction.new("quit", None)
+        quit_action.connect("activate", lambda a, p: self.quit())
+        self.add_action(quit_action)
+
     def do_startup(self):
         Adw.Application.do_startup(self)
         # Accels are application-scoped state (win.* actions are resolved
@@ -33,6 +40,11 @@ class MdViewApplication(Adw.Application):
         self.set_accels_for_action("win.zoom-out", ["<primary>minus", "<primary>KP_Subtract"])
         self.set_accels_for_action("win.zoom-reset", ["<primary>0"])
         self.set_accels_for_action("win.print-doc", ["<primary>p"])
+        # Ctrl+W closes the current document's window (Papers/Evince/GNOME
+        # convention); Ctrl+Q quits the whole application, all windows at
+        # once -- distinct from Ctrl+W only when more than one is open.
+        self.set_accels_for_action("window.close", ["<primary>w"])
+        self.set_accels_for_action("app.quit", ["<primary>q"])
 
     def do_open(self, files, n_files, hint):
         # One window per file, including when this arrives at an
