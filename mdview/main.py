@@ -50,7 +50,7 @@ class MdViewApplication(Adw.Application):
     def _on_about(self, action, param):
         about = Adw.AboutDialog(
             application_name="mdview",
-            application_icon="text-markdown-symbolic",
+            application_icon="text-x-generic-symbolic",
             version=__version__,
             developer_name="mdview contributors",
             license_type=Gtk.License.GPL_2_0,

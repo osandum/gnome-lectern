@@ -320,7 +320,7 @@ class MdViewWindow(Adw.ApplicationWindow):
         status = Adw.StatusPage(
             title="No Document",
             description="Open a Markdown file to view it here.",
-            icon_name="text-markdown-symbolic",
+            icon_name="text-x-generic-symbolic",
         )
         open_button = Gtk.Button(label="Open File…", halign=Gtk.Align.CENTER)
         open_button.add_css_class("suggested-action")
