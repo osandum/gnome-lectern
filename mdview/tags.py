@@ -60,6 +60,14 @@ _HEADING_SPACE_ABOVE = [18, 16, 14, 12, 10, 10]
 # no spacing tag of their own).
 BLOCK_GAP_ABOVE = 10
 
+# Extra space between wrapped display lines *within* one paragraph --
+# distinct from BLOCK_GAP_ABOVE (space *between* paragraphs). GTK's
+# default is 0, which reads as slightly cramped for prose; applied via
+# the always-on "prose" tag below (see renderer.py's root RenderCtx),
+# not per block type, since it's a base body-text property everything
+# else layers on top of.
+PROSE_LINE_SPACING = 3
+
 # Indent step, in pixels, per nesting level of list content.
 LIST_INDENT_STEP = 24
 LIST_HANGING_INDENT = -16
@@ -99,6 +107,13 @@ def tag_style_props(dark):
     """
     palette = _DARK if dark else _LIGHT
     props = {
+        # Always present in every top-level RenderCtx (see renderer.py),
+        # so it's the one tag guaranteed to overlap every paragraph's
+        # wrapped lines -- including inside blockquotes/list items, since
+        # push_block() only ever appends to block_tags, never replaces
+        # them. Harmless on code-block text too: wrap-mode=NONE there
+        # means lines never wrap, so pixels-inside-wrap has nothing to do.
+        "prose": {"pixels-inside-wrap": PROSE_LINE_SPACING},
         "em": {"style": Pango.Style.ITALIC},
         "strong": {"weight": Pango.Weight.BOLD},
         "strike": {"strikethrough": True},

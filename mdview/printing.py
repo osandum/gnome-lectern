@@ -77,6 +77,12 @@ def _build_text_layout(context, style_table, item, width_pt):
     layout = context.create_pango_layout()
     layout.set_width(Pango.units_from_double(max(width_pt, 1.0)))
     layout.set_wrap(Pango.WrapMode.WORD_CHAR)
+    # Matches the "prose" tag's pixels-inside-wrap on screen (tags.py) --
+    # Pango.Layout has no per-run equivalent, so it's set once here at
+    # the whole-layout level instead. Harmless on the rare print code
+    # block that actually wraps (screen never wraps code at all, via
+    # wrap-mode=NONE, but print's layouts are uniformly WORD_CHAR).
+    layout.set_spacing(Pango.units_from_double(tagdefs.PROSE_LINE_SPACING))
     layout.set_text(combined, -1)
     attr_list = Pango.AttrList()
     byte_offset = 0

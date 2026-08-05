@@ -79,7 +79,11 @@ class MarkdownRenderer:
     def render(self, tree, buffer):
         self.tag_table = buffer.get_tag_table()
         it = buffer.get_start_iter()
-        self._walk_block(tree, buffer, it, RenderCtx())
+        # "prose" carries only pixels-inside-wrap (see tags.py) -- seeding
+        # it into the root context means every push_block() descendant
+        # (blockquotes, list items, nested lists...) inherits it too,
+        # since push_block only ever appends, never replaces.
+        self._walk_block(tree, buffer, it, RenderCtx(["prose"]))
 
     def attach_pending_widgets(self, textview):
         """Must be called after render() and after the buffer is assigned
