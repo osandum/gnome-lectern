@@ -57,7 +57,15 @@ def _cell_text(cell_node):
     parts = []
 
     def walk(node):
-        if node.type == "text":
+        # "text" and "code_inline" are both leaf nodes whose content lives
+        # in .content, not in .children -- code_inline has zero children,
+        # so recursing into it (the fallback branch below) silently
+        # produces nothing. This is exactly what made a cell like
+        # `[`../app/foo/`](../app/foo/)` (a link whose display text is
+        # itself inline code) render as a blank cell: the "link" node
+        # correctly recursed into its "code_inline" child, but nothing
+        # captured that child's own .content.
+        if node.type in ("text", "code_inline"):
             parts.append(node.content)
         elif node.type == "softbreak":
             parts.append(" ")
