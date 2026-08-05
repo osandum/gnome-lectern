@@ -38,3 +38,7 @@ v1. See known scope cuts in the design notes: find doesn't search inside
 table cells, table column widths are a simple median-character-count
 heuristic rather than true text-measurement-based sizing, and highlighting for
 undeclared/obscure fenced-code languages is best-effort.
+
+## License
+
+GPL-2.0-or-later, see [LICENSE](LICENSE).
