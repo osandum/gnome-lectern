@@ -16,6 +16,7 @@ gi.require_version("PangoCairo", "1.0")
 from gi.repository import Gtk, Pango, PangoCairo
 
 from . import tags as tagdefs
+from . import tables as tabledefs
 
 BLOCK_GAP_PT = 8.0
 HR_HEIGHT_PT = 1.0
@@ -102,17 +103,24 @@ def _build_text_layout(context, style_table, item, width_pt):
 
 def _build_table_rows(context, style_table, rows, width_pt):
     if not rows:
-        return [], [], width_pt
+        return [], [], []
     # Shared with tables.py's on-screen <b>...</b> header markup via
     # tags.py's "table-header" entry, so "headers are bold" is one fact.
     header_weight = style_table.get("table-header", {}).get("weight", Pango.Weight.BOLD)
     ncols = max(len(r) for r in rows)
-    col_width = width_pt / ncols
+    # Same median-character-count weighting tables.py uses for the
+    # on-screen Gtk.Grid (via max-width-chars), so a column doesn't come
+    # out "wide" on screen and "narrow" on paper -- one shared notion of
+    # column proportions, applied via the two renderers' own units.
+    weights = tabledefs.column_char_weights(rows)
+    total_weight = sum(weights)
+    col_widths = [width_pt * w / total_weight for w in weights]
     row_layouts, row_heights = [], []
     for row_index, row in enumerate(rows):
         cells, max_h = [], 0.0
         for col_index in range(ncols):
             text = row[col_index] if col_index < len(row) else ""
+            col_width = col_widths[col_index]
             layout = context.create_pango_layout()
             layout.set_width(Pango.units_from_double(max(col_width - 2 * TABLE_CELL_PAD_PT, 1.0)))
             layout.set_wrap(Pango.WrapMode.WORD_CHAR)
@@ -129,7 +137,7 @@ def _build_table_rows(context, style_table, rows, width_pt):
             cells.append(layout)
         row_layouts.append(cells)
         row_heights.append(max_h)
-    return row_layouts, row_heights, col_width
+    return row_layouts, row_heights, col_widths
 
 
 class _Block:
@@ -142,7 +150,7 @@ class _Block:
         self.layout = None
         self.lines = None
         self.rows = None
-        self.col_width = None
+        self.col_widths = None
         self.height = 0.0
 
     @classmethod
@@ -160,10 +168,10 @@ class _Block:
         return block
 
     @classmethod
-    def table(cls, x, row_layouts, row_heights, col_width):
+    def table(cls, x, row_layouts, row_heights, col_widths):
         block = cls("table", x)
         block.rows = (row_layouts, row_heights)
-        block.col_width = col_width
+        block.col_widths = col_widths
         block.height = sum(row_heights) + TABLE_ROW_GAP_PT * max(len(row_heights) - 1, 0)
         return block
 
@@ -179,11 +187,11 @@ def _build_blocks(context, style_table, print_model, page_width):
             blocks.append(_Block.hr())
         elif item.kind == "table":
             x = _left_margin_pt(item.block_tags)
-            row_layouts, row_heights, col_width = _build_table_rows(
+            row_layouts, row_heights, col_widths = _build_table_rows(
                 context, style_table, item.rows, page_width - x
             )
             if row_layouts:
-                blocks.append(_Block.table(x, row_layouts, row_heights, col_width))
+                blocks.append(_Block.table(x, row_layouts, row_heights, col_widths))
     return blocks
 
 
@@ -227,7 +235,7 @@ def _paginate(blocks, page_height):
                     rows_here.append((row_layouts[i], row_y, row_heights[i]))
                     row_y += row_heights[i] + TABLE_ROW_GAP_PT
                     i += 1
-                current.append({"type": "table", "x": block.x, "col_width": block.col_width, "rows": rows_here})
+                current.append({"type": "table", "x": block.x, "col_widths": block.col_widths, "rows": rows_here})
                 y = row_y
                 if i < len(row_layouts):
                     new_page()
@@ -280,17 +288,17 @@ def _draw_entry(cr, entry, page_width):
         cr.stroke()
         cr.restore()
     elif entry["type"] == "table":
-        x0, col_width = entry["x"], entry["col_width"]
+        x0, col_widths = entry["x"], entry["col_widths"]
         for cell_layouts, row_y, row_h in entry["rows"]:
             cx = x0
-            for layout in cell_layouts:
+            for col_index, layout in enumerate(cell_layouts):
                 cr.move_to(cx + TABLE_CELL_PAD_PT, row_y + TABLE_CELL_PAD_PT)
                 PangoCairo.show_layout(cr, layout)
-                cx += col_width
+                cx += col_widths[col_index]
             cr.save()
             cr.set_source_rgb(0.8, 0.8, 0.8)
             cr.set_line_width(0.5)
-            cr.rectangle(x0, row_y, col_width * len(cell_layouts), row_h)
+            cr.rectangle(x0, row_y, sum(col_widths[:len(cell_layouts)]), row_h)
             cr.stroke()
             cr.restore()
     elif entry["type"] == "layout":

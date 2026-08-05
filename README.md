@@ -35,5 +35,6 @@ manipulation only needs GTK initialized, not a realized window.
 ## Status
 
 v1. See known scope cuts in the design notes: find doesn't search inside
-table cells, print uses equal-width table columns, and highlighting for
+table cells, table column widths are a simple median-character-count
+heuristic rather than true text-measurement-based sizing, and highlighting for
 undeclared/obscure fenced-code languages is best-effort.
