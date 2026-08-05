@@ -62,7 +62,14 @@ class MdViewApplication(Adw.Application):
 
 def main():
     app = MdViewApplication()
-    return app.run(sys.argv)
+    try:
+        return app.run(sys.argv)
+    except KeyboardInterrupt:
+        # PyGObject's own SIGINT-fallback (gi/_ossighelper.py) lets the
+        # GLib main loop quit cleanly on Ctrl-C, then re-raises
+        # KeyboardInterrupt out of app.run() so callers can decide what to
+        # do with it -- a bare CLI traceback isn't the right answer here.
+        return 130  # conventional exit code for SIGINT-terminated processes
 
 
 if __name__ == "__main__":
