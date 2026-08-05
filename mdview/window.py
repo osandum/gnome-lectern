@@ -330,10 +330,38 @@ class MdViewWindow(Adw.ApplicationWindow):
             target = self._renderer.target_at_iter(it) if it is not None else None
         self._textview.set_cursor_from_name("pointer" if target is not None else "text")
 
+    def _open_href(self, href):
+        """Open a link/table-cell href, resolving it against the open
+        document's own directory first if it has no URI scheme -- a bare
+        Gio.AppInfo.launch_default_for_uri("../app/foo/") fails outright
+        (GLib.Error: g-io-error-quark: Operation not supported), since
+        that's not a URI at all, just a relative filesystem path. This is
+        the common case for documentation that cross-links to files
+        sitting next to it, e.g. this app's own tests/fixtures/*.md.
+        A resolved link to another .md file opens in mdview itself,
+        for free, since we're the registered default handler for
+        text/markdown -- no special-casing needed here.
+        """
+        if not href or GLib.uri_parse_scheme(href) is not None:
+            target_uri = href
+        else:
+            base_dir = self._document.gfile.get_parent() if self._document else None
+            target_uri = base_dir.resolve_relative_path(href).get_uri() if base_dir else None
+        if not target_uri:
+            return
+        try:
+            Gio.AppInfo.launch_default_for_uri(target_uri, None)
+        except GLib.Error:
+            self._toast_overlay.add_toast(Adw.Toast(title="Couldn’t open link", timeout=3))
+
+    def _on_table_link_activated(self, label, uri):
+        self._open_href(uri)
+        return True  # stop Gtk.Label's own default handling
+
     def _activate_target(self, target):
         kind = target["type"]
         if kind == "url":
-            Gio.AppInfo.launch_default_for_uri(target["href"], None)
+            self._open_href(target["href"])
         elif kind == "footnote-jump":
             mark_name = self._renderer.footnote_def_mark_name(target["label"])
             self._scroll_to_mark_name(mark_name)
@@ -407,10 +435,12 @@ class MdViewWindow(Adw.ApplicationWindow):
         dark = self._style_manager.get_dark()
         buffer = Gtk.TextBuffer(tag_table=tagdefs.create_tag_table(dark))
         self._renderer = MarkdownRenderer()
-        self._renderer.render(self._document.tree, buffer)
+        self._renderer.render(self._document.tree, buffer, dark=dark)
         self._textview.set_buffer(buffer)
         self._fill_width_widgets = self._renderer.attach_pending_widgets(self._textview)
         self._sync_fill_width_widgets()
+        for label in self._renderer.table_link_labels:
+            label.connect("activate-link", self._on_table_link_activated)
         self._find = FindController(self._textview)
         self._sync_find_label()
 

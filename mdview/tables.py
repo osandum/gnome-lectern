@@ -77,23 +77,95 @@ def _cell_text(cell_node):
     return "".join(parts).strip()
 
 
-def extract_rows(table_node):
-    """Return list[list[str]] of cell text, header row(s) included first."""
-    rows = []
+def _iter_rows(table_node):
+    """Yield list[cell_node] for every row (header row(s) first, GFM
+    tables always have exactly one) -- the shared structural walk behind
+    extract_rows and build_table_widget, so they can't disagree about
+    what a "row" is."""
     for section in table_node.children:  # thead, tbody
         for tr in section.children:
-            rows.append([_cell_text(cell) for cell in tr.children])
-    return rows
+            yield list(tr.children)
 
 
-def build_table_widget(table_node):
-    """Return (widget_to_embed, rows) -- rows is reused verbatim for print.
+def extract_rows(table_node):
+    """Return list[list[str]] of cell text, header row(s) included first."""
+    return [[_cell_text(cell) for cell in cells] for cells in _iter_rows(table_node)]
 
-    GFM tables always have exactly one header row (from <thead>) followed
-    by the body, so row 0 of the flat list from extract_rows() is always
-    the header -- same convention printing.py's _build_table_rows uses.
+
+def _cell_markup(cell_node, link_color):
+    """Render a cell's inline content as Pango markup for an on-screen
+    Gtk.Label -- preserves links as clickable <a href> spans (so a cell
+    like `[`../app/foo/`](../app/foo/)` is navigable, not just readable)
+    plus the same handful of inline styles renderer.py supports for body
+    text. Only covers what plausibly turns up in a table cell, not the
+    full inline grammar the main buffer renderer handles.
     """
-    rows = extract_rows(table_node)
+    parts = []
+
+    def open_link(href):
+        if href:
+            # Color applied here, not via the shared "link" TextTag --
+            # table cells are separate Gtk.Label widgets outside that
+            # tag table (see tags.link_color_hex's docstring).
+            escaped = GLib.markup_escape_text(href)
+            parts.append(f'<a href="{escaped}"><span foreground="{link_color}">')
+
+    def close_link(href):
+        if href:
+            parts.append("</span></a>")
+
+    def walk(node, href=None):
+        t = node.type
+        if t == "text":
+            open_link(href)
+            parts.append(GLib.markup_escape_text(node.content))
+            close_link(href)
+        elif t == "code_inline":
+            open_link(href)
+            parts.append(f"<tt>{GLib.markup_escape_text(node.content)}</tt>")
+            close_link(href)
+        elif t == "softbreak":
+            parts.append(" ")
+        elif t == "strong":
+            parts.append("<b>")
+            for child in node.children:
+                walk(child, href)
+            parts.append("</b>")
+        elif t == "em":
+            parts.append("<i>")
+            for child in node.children:
+                walk(child, href)
+            parts.append("</i>")
+        elif t == "s":
+            parts.append("<s>")
+            for child in node.children:
+                walk(child, href)
+            parts.append("</s>")
+        elif t == "link":
+            # Nested links aren't valid Markdown, so this can't nest --
+            # simply adopt the innermost href, matching CommonMark's own
+            # "link text can't itself contain a link" rule.
+            inner_href = node.attrs.get("href", "")
+            for child in node.children:
+                walk(child, inner_href)
+        else:
+            for child in node.children:
+                walk(child, href)
+
+    walk(cell_node)
+    return "".join(parts)
+
+
+def build_table_widget(table_node, link_color):
+    """Return (widget_to_embed, rows, link_labels) -- rows is reused
+    verbatim for print; link_labels are the Gtk.Labels whose markup
+    contains a clickable link, for the caller to connect "activate-link"
+    on (see window.py) -- table cell clicks don't route through the
+    buffer's tag-based dispatch_targets mechanism at all, since this
+    content lives in embedded widgets, not the TextBuffer.
+    """
+    cell_rows = list(_iter_rows(table_node))
+    rows = [[_cell_text(cell) for cell in cells] for cells in cell_rows]
     col_weights = column_char_weights(rows)
     # Thin horizontal rules between rows (header included) rather than a
     # full per-cell grid -- a per-cell Gtk.Frame was tried and rejected:
@@ -101,10 +173,11 @@ def build_table_widget(table_node):
     # as a row of disconnected pills rather than a table. Rules-only
     # matches how GitHub/pandoc render GFM tables in practice.
     grid = Gtk.Grid(column_spacing=16, row_spacing=0)
+    link_labels = []
     grid_row = 0
-    for row_index, row_texts in enumerate(rows):
+    for row_index, cells in enumerate(cell_rows):
         is_head = row_index == 0
-        for col_index, text in enumerate(row_texts):
+        for col_index, cell_node in enumerate(cells):
             label = Gtk.Label(
                 xalign=0.0, wrap=True, hexpand=True,
                 margin_top=6, margin_bottom=6, margin_start=8, margin_end=8,
@@ -116,19 +189,19 @@ def build_table_widget(table_node):
             # short numeric column no longer claims as much room as a
             # column of long sentences.
             label.set_max_width_chars(col_weights[col_index])
-            if is_head:
-                label.set_markup(f"<b>{GLib.markup_escape_text(text)}</b>")
-            else:
-                label.set_text(text)
+            markup = _cell_markup(cell_node, link_color)
+            label.set_markup(f"<b>{markup}</b>" if is_head else markup)
+            if "<a href" in markup:
+                link_labels.append(label)
             grid.attach(label, col_index, grid_row, 1, 1)
         grid_row += 1
-        if row_index < len(rows) - 1:
+        if row_index < len(cell_rows) - 1:
             rule = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-            grid.attach(rule, 0, grid_row, len(row_texts), 1)
+            grid.attach(rule, 0, grid_row, len(cells), 1)
             grid_row += 1
 
     frame = Gtk.Frame()
     frame.set_child(grid)
     frame.set_margin_top(6)
     frame.set_margin_bottom(6)
-    return frame, rows
+    return frame, rows, link_labels

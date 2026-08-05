@@ -68,16 +68,24 @@ class MarkdownRenderer:
         self.tag_table = None
         self.dispatch_targets = {}      # tag name -> {"type": ..., ...}
         self.print_model = []
+        # Gtk.Labels (table cells) whose markup contains a clickable
+        # link -- these live outside the TextBuffer entirely, so they
+        # can't go through dispatch_targets/target_at_iter like buffer
+        # links do. The caller (window.py) connects "activate-link" on
+        # each after render() returns.
+        self.table_link_labels = []
         self._footnote_ref_marks = {}   # label -> mark name
         self._footnote_def_marks = {}   # label -> mark name
         self._pending_anchors = []      # (anchor, widget) drained by caller
         self._instance_counter = 0
         self._emitted_any_block = False
+        self._link_color = tagdefs.link_color_hex(dark=False)  # overwritten by render()
 
     # -- public API ---------------------------------------------------
 
-    def render(self, tree, buffer):
+    def render(self, tree, buffer, dark=False):
         self.tag_table = buffer.get_tag_table()
+        self._link_color = tagdefs.link_color_hex(dark)
         it = buffer.get_start_iter()
         # "prose" carries only pixels-inside-wrap (see tags.py) -- seeding
         # it into the root context means every push_block() descendant
@@ -236,7 +244,8 @@ class MarkdownRenderer:
         self.print_model.append(PrintItem("hr", block_tags=list(ctx.block_tags)))
 
     def _emit_table(self, node, buffer, it, ctx):
-        widget, rows = tables.build_table_widget(node)
+        widget, rows, link_labels = tables.build_table_widget(node, self._link_color)
+        self.table_link_labels.extend(link_labels)
         anchor = buffer.create_child_anchor(it)
         self._pending_anchors.append((anchor, widget))
         buffer.insert(it, "\n")

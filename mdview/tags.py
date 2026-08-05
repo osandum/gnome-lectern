@@ -88,6 +88,18 @@ def _rgba(spec):
     return rgba
 
 
+def link_color_hex(dark):
+    """The raw hex string backing the "link" tag's color, for callers that
+    need to build Pango markup directly (tables.py's clickable cell
+    links) rather than going through the shared Gtk.TextTag table. Table
+    cells are separate Gtk.Label widgets outside that table, so unlike
+    buffer text they won't repaint automatically via update_tag_colors()
+    if the desktop theme flips light/dark mid-session -- accepted as a
+    minor known limitation rather than building live-recolor plumbing
+    for it."""
+    return (_DARK if dark else _LIGHT)["link"]
+
+
 @functools.lru_cache(maxsize=2)
 def tag_style_props(dark):
     """The single source of truth for tag -> GObject-property-value pairs,

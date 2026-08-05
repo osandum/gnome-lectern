@@ -111,6 +111,29 @@ def test_table_becomes_embedded_widget_and_print_rows():
     assert len(renderer._pending_anchors) == 1
 
 
+def test_table_cell_link_with_code_text_is_not_blank():
+    # Regression test: a link whose display text is itself inline code
+    # (a common pattern in documentation cross-references, e.g.
+    # `[`../app/foo/`](../app/foo/)`) rendered as a completely blank
+    # cell -- code_inline is a leaf node with zero children, so the
+    # cell-text walker's generic "recurse into children" fallback
+    # silently produced nothing for it.
+    markdown_text = "| Path |\n|---|\n| [`../app/foo/`](../app/foo/) |\n"
+    renderer, buffer = render(markdown_text)
+    table_items = [item for item in renderer.print_model if item.kind == "table"]
+    assert table_items[0].rows == [["Path"], ["../app/foo/"]]
+
+
+def test_table_cell_link_is_clickable():
+    markdown_text = "| Path |\n|---|\n| [`../app/foo/`](../app/foo/) |\n"
+    renderer, buffer = render(markdown_text)
+    assert len(renderer.table_link_labels) == 1
+    label = renderer.table_link_labels[0]
+    markup = label.get_label()
+    assert 'href="../app/foo/"' in markup
+    assert "../app/foo/" in markup
+
+
 def test_footnote_ref_and_definition_roundtrip():
     renderer, buffer = render("claim.[^1]\n\n[^1]: the definition.\n")
     text = buffer_text(buffer)
