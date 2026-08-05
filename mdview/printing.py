@@ -1,0 +1,333 @@
+"""Print pipeline, driven entirely off MarkdownRenderer.print_model -- never
+by re-walking the live TextBuffer. That's deliberate: Gtk.TextChildAnchor
+-embedded tables leave a single object-replacement character in the
+buffer's text stream, so reconstructing formatted text from the buffer
+after the fact would silently lose every table cell.
+
+Pango.AttrList offsets are UTF-8 *byte* offsets, not character offsets --
+this bit us once already while building this file, so run-boundary byte
+lengths are computed explicitly throughout rather than assumed to match
+`len(text)`.
+"""
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Pango", "1.0")
+gi.require_version("PangoCairo", "1.0")
+from gi.repository import Gtk, Pango, PangoCairo
+
+from . import tags as tagdefs
+
+BLOCK_GAP_PT = 8.0
+HR_HEIGHT_PT = 1.0
+HR_BLOCK_HEIGHT_PT = 16.0
+TABLE_CELL_PAD_PT = 6.0
+TABLE_ROW_GAP_PT = 4.0
+
+# Only run-level (character-range) properties translate to Pango
+# attributes; margins/backgrounds/pixel-spacing are block-level concerns
+# handled by this module's own layout math instead.
+_PROP_TO_ATTR_CTOR = {
+    "weight": Pango.attr_weight_new,
+    "style": Pango.attr_style_new,
+    "scale": Pango.attr_scale_new,
+    "strikethrough": Pango.attr_strikethrough_new,
+    "family": Pango.attr_family_new,
+    "underline": Pango.attr_underline_new,
+    "rise": Pango.attr_rise_new,
+}
+
+
+def _foreground_attr(rgba):
+    return Pango.attr_foreground_new(
+        int(rgba.red * 65535), int(rgba.green * 65535), int(rgba.blue * 65535)
+    )
+
+
+def _left_margin_pt(block_tags):
+    margin = 0.0
+    for name in block_tags:
+        if name == "blockquote":
+            margin += tagdefs.BLOCKQUOTE_INDENT
+        elif name.startswith("list-indent-"):
+            level = int(name.rsplit("-", 1)[1])
+            margin += tagdefs.LIST_INDENT_STEP * (level + 1)
+    return margin
+
+
+def _line_geometry(layout):
+    """[(Pango.LayoutLine, y_top_pt, height_pt, baseline_pt), ...]."""
+    result = []
+    it = layout.get_iter()
+    while True:
+        line = it.get_line_readonly()
+        _ink, logical = it.get_line_extents()
+        y_top = Pango.units_to_double(logical.y)
+        height = Pango.units_to_double(logical.height)
+        baseline = Pango.units_to_double(it.get_baseline())
+        result.append((line, y_top, height, baseline))
+        if not it.next_line():
+            break
+    return result
+
+
+def _build_text_layout(context, style_table, item, width_pt):
+    combined = "".join(text for text, _tags in item.runs) or " "
+    layout = context.create_pango_layout()
+    layout.set_width(Pango.units_from_double(max(width_pt, 1.0)))
+    layout.set_wrap(Pango.WrapMode.WORD_CHAR)
+    layout.set_text(combined, -1)
+    attr_list = Pango.AttrList()
+    byte_offset = 0
+    for text, tag_names in item.runs:
+        nbytes = len(text.encode("utf-8"))
+        for name in tag_names:
+            props = style_table.get(name)
+            if not props:
+                continue
+            for prop, value in props.items():
+                if prop == "foreground-rgba":
+                    attr = _foreground_attr(value)
+                else:
+                    ctor = _PROP_TO_ATTR_CTOR.get(prop)
+                    if ctor is None:
+                        continue
+                    attr = ctor(value)
+                attr.start_index = byte_offset
+                attr.end_index = byte_offset + nbytes
+                attr_list.insert(attr)
+        byte_offset += nbytes
+    layout.set_attributes(attr_list)
+    return layout
+
+
+def _build_table_rows(context, style_table, rows, width_pt):
+    if not rows:
+        return [], [], width_pt
+    # Shared with tables.py's on-screen <b>...</b> header markup via
+    # tags.py's "table-header" entry, so "headers are bold" is one fact.
+    header_weight = style_table.get("table-header", {}).get("weight", Pango.Weight.BOLD)
+    ncols = max(len(r) for r in rows)
+    col_width = width_pt / ncols
+    row_layouts, row_heights = [], []
+    for row_index, row in enumerate(rows):
+        cells, max_h = [], 0.0
+        for col_index in range(ncols):
+            text = row[col_index] if col_index < len(row) else ""
+            layout = context.create_pango_layout()
+            layout.set_width(Pango.units_from_double(max(col_width - 2 * TABLE_CELL_PAD_PT, 1.0)))
+            layout.set_wrap(Pango.WrapMode.WORD_CHAR)
+            layout.set_text(text, -1)
+            if row_index == 0:
+                al = Pango.AttrList()
+                attr = Pango.attr_weight_new(header_weight)
+                attr.start_index = 0
+                attr.end_index = len(text.encode("utf-8"))
+                al.insert(attr)
+                layout.set_attributes(al)
+            _w, h = layout.get_pixel_size()
+            max_h = max(max_h, h + 2 * TABLE_CELL_PAD_PT)
+            cells.append(layout)
+        row_layouts.append(cells)
+        row_heights.append(max_h)
+    return row_layouts, row_heights, col_width
+
+
+class _Block:
+    """One drawable unit produced from a PrintItem, laid out against a
+    specific content width and ready to be sliced across pages."""
+
+    def __init__(self, kind, x=0.0):
+        self.kind = kind
+        self.x = x
+        self.layout = None
+        self.lines = None
+        self.rows = None
+        self.col_width = None
+        self.height = 0.0
+
+    @classmethod
+    def text(cls, x, layout):
+        block = cls("layout", x)
+        block.layout = layout
+        block.lines = _line_geometry(layout)
+        block.height = (block.lines[-1][1] + block.lines[-1][2]) if block.lines else 0.0
+        return block
+
+    @classmethod
+    def hr(cls):
+        block = cls("hr", 0.0)
+        block.height = HR_BLOCK_HEIGHT_PT
+        return block
+
+    @classmethod
+    def table(cls, x, row_layouts, row_heights, col_width):
+        block = cls("table", x)
+        block.rows = (row_layouts, row_heights)
+        block.col_width = col_width
+        block.height = sum(row_heights) + TABLE_ROW_GAP_PT * max(len(row_heights) - 1, 0)
+        return block
+
+
+def _build_blocks(context, style_table, print_model, page_width):
+    blocks = []
+    for item in print_model:
+        if item.kind in ("paragraph", "code-block"):
+            x = _left_margin_pt(item.block_tags)
+            layout = _build_text_layout(context, style_table, item, page_width - x)
+            blocks.append(_Block.text(x, layout))
+        elif item.kind == "hr":
+            blocks.append(_Block.hr())
+        elif item.kind == "table":
+            x = _left_margin_pt(item.block_tags)
+            row_layouts, row_heights, col_width = _build_table_rows(
+                context, style_table, item.rows, page_width - x
+            )
+            if row_layouts:
+                blocks.append(_Block.table(x, row_layouts, row_heights, col_width))
+    return blocks
+
+
+def _out_of_room(y, gap, page_height):
+    """True if even the inter-block gap wouldn't fit before this block
+    starts. Used by table/layout blocks, which paginate their own content
+    chunk-by-chunk once started -- this is only the pre-check for whether
+    there's room to *begin*. hr is atomic (never chunked) so it checks its
+    own full height too, inline, rather than through this helper."""
+    return y + gap >= page_height
+
+
+def _paginate(blocks, page_height):
+    pages, current, y = [], [], 0.0
+
+    def new_page():
+        nonlocal current, y
+        pages.append(current)
+        current, y = [], 0.0
+
+    for block in blocks:
+        gap = BLOCK_GAP_PT if current else 0.0
+        if block.kind == "hr":
+            if y + gap + block.height > page_height and current:
+                new_page()
+                gap = 0.0
+            current.append({"type": "hr", "y": y + gap + block.height / 2})
+            y += gap + block.height
+        elif block.kind == "table":
+            if current and _out_of_room(y, gap, page_height):
+                new_page()
+                gap = 0.0
+            y += gap
+            row_layouts, row_heights = block.rows
+            i = 0
+            while i < len(row_layouts):
+                rows_here, row_y = [], y
+                while i < len(row_layouts):
+                    if row_y + row_heights[i] > page_height and rows_here:
+                        break
+                    rows_here.append((row_layouts[i], row_y, row_heights[i]))
+                    row_y += row_heights[i] + TABLE_ROW_GAP_PT
+                    i += 1
+                current.append({"type": "table", "x": block.x, "col_width": block.col_width, "rows": rows_here})
+                y = row_y
+                if i < len(row_layouts):
+                    new_page()
+        else:  # "layout": paragraph or code-block
+            if current and _out_of_room(y, gap, page_height):
+                new_page()
+                gap = 0.0
+            y += gap
+            lines = block.lines
+            li = 0
+            while li < len(lines):
+                remaining = page_height - y
+                chunk_top = lines[li][1]
+                chunk = []
+                while li < len(lines):
+                    _line, y_top, height, _baseline = lines[li]
+                    if (y_top - chunk_top) + height > remaining and chunk:
+                        break
+                    chunk.append(lines[li])
+                    li += 1
+                if not chunk:
+                    # A single line taller than a whole page: draw it anyway
+                    # (it will clip) rather than loop forever.
+                    chunk = [lines[li]]
+                    li += 1
+                chunk_height = (chunk[-1][1] + chunk[-1][2]) - chunk[0][1]
+                current.append({
+                    "type": "layout", "x": block.x, "y": y,
+                    # get_baseline() is absolute (layout-origin-relative),
+                    # same coordinate space as y_top -- draw position must
+                    # track the *baseline* delta directly, not y_top plus
+                    # baseline (that double-counts each line's ascent).
+                    "lines": chunk, "origin_baseline": chunk[0][3],
+                })
+                y += chunk_height
+                if li < len(lines):
+                    new_page()
+    if current or not pages:
+        pages.append(current)
+    return pages
+
+
+def _draw_entry(cr, entry, page_width):
+    if entry["type"] == "hr":
+        cr.save()
+        cr.set_source_rgb(0.6, 0.6, 0.6)
+        cr.set_line_width(HR_HEIGHT_PT)
+        cr.move_to(0, entry["y"])
+        cr.line_to(page_width, entry["y"])
+        cr.stroke()
+        cr.restore()
+    elif entry["type"] == "table":
+        x0, col_width = entry["x"], entry["col_width"]
+        for cell_layouts, row_y, row_h in entry["rows"]:
+            cx = x0
+            for layout in cell_layouts:
+                cr.move_to(cx + TABLE_CELL_PAD_PT, row_y + TABLE_CELL_PAD_PT)
+                PangoCairo.show_layout(cr, layout)
+                cx += col_width
+            cr.save()
+            cr.set_source_rgb(0.8, 0.8, 0.8)
+            cr.set_line_width(0.5)
+            cr.rectangle(x0, row_y, col_width * len(cell_layouts), row_h)
+            cr.stroke()
+            cr.restore()
+    elif entry["type"] == "layout":
+        for line, _y_top, _height, baseline in entry["lines"]:
+            cr.move_to(entry["x"], entry["y"] + (baseline - entry["origin_baseline"]))
+            PangoCairo.show_layout_line(cr, line)
+
+
+class PrintCoordinator:
+    """One instance per print action; holds no state between calls."""
+
+    def print_document(self, parent_window, print_model, dark, title,
+                        action=Gtk.PrintOperationAction.PRINT_DIALOG, export_path=None):
+        op = Gtk.PrintOperation()
+        op.set_job_name(title)
+        if export_path:
+            op.set_export_filename(export_path)
+        state = {}
+        op.connect("begin-print", self._on_begin_print, print_model, dark, state)
+        op.connect("draw-page", self._on_draw_page, state)
+        return op.run(action, parent_window)
+
+    def _on_begin_print(self, op, context, print_model, dark, state):
+        style_table = tagdefs.tag_style_props(dark)
+        width, height = context.get_width(), context.get_height()
+        state["width"] = width
+        blocks = _build_blocks(context, style_table, print_model, width)
+        # Pango.LayoutLine keeps only a *weak* back-reference to its parent
+        # Pango.Layout -- without this, `blocks` (and therefore every
+        # Layout) would be garbage collected the moment this method
+        # returns, and draw-page would run against dangling lines.
+        state["blocks"] = blocks
+        pages = _paginate(blocks, height)
+        state["pages"] = pages
+        op.set_n_pages(len(pages))
+
+    def _on_draw_page(self, op, context, page_nr, state):
+        cr = context.get_cairo_context()
+        for entry in state["pages"][page_nr]:
+            _draw_entry(cr, entry, state["width"])
