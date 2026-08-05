@@ -22,7 +22,8 @@ BLOCK_GAP_PT = 8.0
 HR_HEIGHT_PT = 1.0
 HR_BLOCK_HEIGHT_PT = 16.0
 TABLE_CELL_PAD_PT = 6.0
-TABLE_ROW_GAP_PT = 4.0
+TABLE_ROW_GAP_PT = 6.0
+TABLE_RULE_RGB = (0.7, 0.7, 0.7)
 
 # Only run-level (character-range) properties translate to Pango
 # attributes; margins/backgrounds/pixel-spacing are block-level concerns
@@ -226,16 +227,25 @@ def _paginate(blocks, page_height):
                 gap = 0.0
             y += gap
             row_layouts, row_heights = block.rows
+            total_rows = len(row_layouts)
             i = 0
             while i < len(row_layouts):
                 rows_here, row_y = [], y
                 while i < len(row_layouts):
                     if row_y + row_heights[i] > page_height and rows_here:
                         break
-                    rows_here.append((row_layouts[i], row_y, row_heights[i]))
+                    # Global row index travels with each row (not reset
+                    # per page) so _draw_entry can tell whether a given
+                    # row is the table's true last row -- it draws a rule
+                    # after every row except that one, to match the
+                    # on-screen rules-between-rows style exactly.
+                    rows_here.append((row_layouts[i], row_y, row_heights[i], i))
                     row_y += row_heights[i] + TABLE_ROW_GAP_PT
                     i += 1
-                current.append({"type": "table", "x": block.x, "col_widths": block.col_widths, "rows": rows_here})
+                current.append({
+                    "type": "table", "x": block.x, "col_widths": block.col_widths,
+                    "rows": rows_here, "total_rows": total_rows,
+                })
                 y = row_y
                 if i < len(row_layouts):
                     new_page()
@@ -288,19 +298,26 @@ def _draw_entry(cr, entry, page_width):
         cr.stroke()
         cr.restore()
     elif entry["type"] == "table":
+        # Thin rule under each row except the table's true last one --
+        # matches tables.py's on-screen Gtk.Separator-between-rows style
+        # (no per-cell boxes: tried a full grid, rejected as too heavy/
+        # inconsistent with a plain-rules look).
         x0, col_widths = entry["x"], entry["col_widths"]
-        for cell_layouts, row_y, row_h in entry["rows"]:
+        for cell_layouts, row_y, row_h, row_index in entry["rows"]:
             cx = x0
             for col_index, layout in enumerate(cell_layouts):
                 cr.move_to(cx + TABLE_CELL_PAD_PT, row_y + TABLE_CELL_PAD_PT)
                 PangoCairo.show_layout(cr, layout)
                 cx += col_widths[col_index]
-            cr.save()
-            cr.set_source_rgb(0.8, 0.8, 0.8)
-            cr.set_line_width(0.5)
-            cr.rectangle(x0, row_y, sum(col_widths[:len(cell_layouts)]), row_h)
-            cr.stroke()
-            cr.restore()
+            if row_index < entry["total_rows"] - 1:
+                rule_y = row_y + row_h + TABLE_ROW_GAP_PT / 2
+                cr.save()
+                cr.set_source_rgb(*TABLE_RULE_RGB)
+                cr.set_line_width(0.75)
+                cr.move_to(x0, rule_y)
+                cr.line_to(x0 + sum(col_widths[:len(cell_layouts)]), rule_y)
+                cr.stroke()
+                cr.restore()
     elif entry["type"] == "layout":
         for line, _y_top, _height, baseline in entry["lines"]:
             cr.move_to(entry["x"], entry["y"] + (baseline - entry["origin_baseline"]))

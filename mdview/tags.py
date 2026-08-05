@@ -112,7 +112,6 @@ def tag_style_props(dark):
             "scale": 0.92,
             "left-margin": 16,
             "right-margin": 16,
-            "paragraph-background-rgba": _rgba(palette["code-bg"]),
             "wrap-mode": Gtk.WrapMode.NONE,
         },
         # See BLOCK_GAP_ABOVE's comment -- applied only to a block's first

@@ -10,6 +10,11 @@ from gi.repository import Gtk, GLib
 MIN_COLUMN_CHARS = 3  # floor so an all-empty or all-tiny column doesn't collapse to nothing
 
 
+def _longest_word_length(text):
+    words = text.split()
+    return max((len(w) for w in words), default=0)
+
+
 def column_char_weights(rows):
     """Per-column weight = median character length of that column's cells
     (header row included), used as a simple, sensible proxy for how much
@@ -22,14 +27,29 @@ def column_char_weights(rows):
     narrow column (a stray long sentence in a "Notes" column, say)
     shouldn't blow that column's width out the way an outlier drags a
     mean up.
+
+    Floored, per column, at that column's own longest single word (e.g.
+    the header "Supported" against otherwise-short "Yes"/"No" data) --
+    without this, a narrow-but-wordy column can end up assigned less
+    width than its own unbreakable header word needs. On screen this is
+    harmless (Gtk.Label never breaks a word mid-way regardless of what
+    width it's asked for), but printing.py's Pango layouts use
+    WORD_CHAR wrapping and *will* hyphenlessly break a word that doesn't
+    fit -- confirmed by "Supported" printing as "Suppor-/ted" before this
+    floor was added.
     """
     if not rows:
         return []
     ncols = max(len(r) for r in rows)
     weights = []
     for col in range(ncols):
-        lengths = [len(row[col]) for row in rows if col < len(row)]
-        weights.append(max(MIN_COLUMN_CHARS, round(statistics.median(lengths))) if lengths else MIN_COLUMN_CHARS)
+        cells = [row[col] for row in rows if col < len(row)]
+        if not cells:
+            weights.append(MIN_COLUMN_CHARS)
+            continue
+        median_len = round(statistics.median(len(c) for c in cells))
+        longest_word = max(_longest_word_length(c) for c in cells)
+        weights.append(max(MIN_COLUMN_CHARS, median_len, longest_word))
     return weights
 
 
@@ -67,13 +87,20 @@ def build_table_widget(table_node):
     """
     rows = extract_rows(table_node)
     col_weights = column_char_weights(rows)
-    grid = Gtk.Grid(column_spacing=16, row_spacing=4,
-                     margin_top=4, margin_bottom=4,
-                     margin_start=4, margin_end=4)
+    # Thin horizontal rules between rows (header included) rather than a
+    # full per-cell grid -- a per-cell Gtk.Frame was tried and rejected:
+    # Libadwaita renders each Frame as its own rounded card, which reads
+    # as a row of disconnected pills rather than a table. Rules-only
+    # matches how GitHub/pandoc render GFM tables in practice.
+    grid = Gtk.Grid(column_spacing=16, row_spacing=0)
+    grid_row = 0
     for row_index, row_texts in enumerate(rows):
         is_head = row_index == 0
         for col_index, text in enumerate(row_texts):
-            label = Gtk.Label(xalign=0.0, wrap=True, hexpand=True)
+            label = Gtk.Label(
+                xalign=0.0, wrap=True, hexpand=True,
+                margin_top=6, margin_bottom=6, margin_start=8, margin_end=8,
+            )
             # Caps this label's *natural* width to roughly its column's
             # typical content length, instead of the unwrapped full-text
             # width every column got before -- GtkGrid then sizes each
@@ -85,7 +112,12 @@ def build_table_widget(table_node):
                 label.set_markup(f"<b>{GLib.markup_escape_text(text)}</b>")
             else:
                 label.set_text(text)
-            grid.attach(label, col_index, row_index, 1, 1)
+            grid.attach(label, col_index, grid_row, 1, 1)
+        grid_row += 1
+        if row_index < len(rows) - 1:
+            rule = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+            grid.attach(rule, 0, grid_row, len(row_texts), 1)
+            grid_row += 1
 
     frame = Gtk.Frame()
     frame.set_child(grid)
