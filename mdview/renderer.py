@@ -59,6 +59,11 @@ class MarkdownRenderer:
     instance is used for every reload so nothing leaks between renders.
     """
 
+    # Node types that either carry their own spacing (heading) or already
+    # get a visual margin from an embedded widget (hr's Gtk.Separator,
+    # table's Gtk.Frame) -- see _walk_block_node's block-gap wrapping.
+    _BLOCK_GAP_EXCLUDED = {"heading", "hr", "table", "footnote_block"}
+
     def __init__(self):
         self.tag_table = None
         self.dispatch_targets = {}      # tag name -> {"type": ..., ...}
@@ -67,6 +72,7 @@ class MarkdownRenderer:
         self._footnote_def_marks = {}   # label -> mark name
         self._pending_anchors = []      # (anchor, widget) drained by caller
         self._instance_counter = 0
+        self._emitted_any_block = False
 
     # -- public API ---------------------------------------------------
 
@@ -128,7 +134,21 @@ class MarkdownRenderer:
             self._walk_block_node(child, buffer, it, ctx)
 
     def _walk_block_node(self, child, buffer, it, ctx):
+        """Dispatches to the per-type handler below, wrapping it with a
+        "space above this block" tag applied to only the block's *first*
+        buffer line (see tags.py's BLOCK_GAP_ABOVE for why: naively tagging
+        a whole multi-line block, as code-block used to, stacks spacing at
+        every interior line boundary instead of just the block's edges).
+        """
         t = child.type
+        needs_gap = self._emitted_any_block and t not in self._BLOCK_GAP_EXCLUDED
+        start_mark = buffer.create_mark(None, it, True) if needs_gap else None
+        self._dispatch_block_node(t, child, buffer, it, ctx)
+        if start_mark is not None:
+            self._apply_block_gap(buffer, start_mark)
+        self._emitted_any_block = True
+
+    def _dispatch_block_node(self, t, child, buffer, it, ctx):
         if t == "heading":
             level = int(child.tag[1])
             self._emit_simple_paragraph(child, buffer, it, ctx, extra_tag=f"heading{level}")
@@ -148,6 +168,15 @@ class MarkdownRenderer:
             self._walk_footnote_block(child, buffer, it, ctx)
         # Anything else (raw html_block, etc.) is silently skipped -- v1
         # scope cut, not requested.
+
+    @staticmethod
+    def _apply_block_gap(buffer, start_mark):
+        start_iter = buffer.get_iter_at_mark(start_mark)
+        end_iter = start_iter.copy()
+        if not end_iter.ends_line():
+            end_iter.forward_to_line_end()
+        buffer.apply_tag_by_name("block-gap", start_iter, end_iter)
+        buffer.delete_mark(start_mark)
 
     def _emit_simple_paragraph(self, node, buffer, it, ctx, extra_tag=None):
         inline_tags = [extra_tag] if extra_tag else []

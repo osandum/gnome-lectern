@@ -47,6 +47,19 @@ _DARK = {
 _HEADING_SCALE = [1.8, 1.5, 1.3, 1.15, 1.05, 1.0]
 _HEADING_SPACE_ABOVE = [18, 16, 14, 12, 10, 10]
 
+# Space above a top-level block (paragraph, list, blockquote, fenced code),
+# applied by the renderer to only that block's *first* buffer line -- see
+# renderer.py's _apply_block_gap. `pixels-above-lines`/`pixels-below-lines`
+# are per-*paragraph* GTK properties, where "paragraph" means every
+# hard-newline-delimited buffer line, not "semantic Markdown block" -- a
+# tag carrying this on every line of a multi-line block (as code-block
+# used to) stacks 6px-above + 6px-below at every interior line boundary,
+# producing double-spaced-looking code. One shared constant/tag for
+# "gap before the next block" avoids that, and also gives plain
+# paragraphs/lists a gap they otherwise wouldn't have at all (they carry
+# no spacing tag of their own).
+BLOCK_GAP_ABOVE = 10
+
 # Indent step, in pixels, per nesting level of list content.
 LIST_INDENT_STEP = 24
 LIST_HANGING_INDENT = -16
@@ -99,11 +112,13 @@ def tag_style_props(dark):
             "scale": 0.92,
             "left-margin": 16,
             "right-margin": 16,
-            "pixels-above-lines": 6,
-            "pixels-below-lines": 6,
             "paragraph-background-rgba": _rgba(palette["code-bg"]),
             "wrap-mode": Gtk.WrapMode.NONE,
         },
+        # See BLOCK_GAP_ABOVE's comment -- applied only to a block's first
+        # line, never its interior lines, so it can't stack the way
+        # code-block's own pixels-above/below-lines used to.
+        "block-gap": {"pixels-above-lines": BLOCK_GAP_ABOVE},
         "blockquote": {
             "left-margin": BLOCKQUOTE_INDENT,
             "foreground-rgba": _rgba(palette["dim"]),
