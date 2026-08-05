@@ -180,11 +180,40 @@ class MdViewWindow(Adw.ApplicationWindow):
         pill.add_css_class("osd")
         pill.add_css_class("toolbar")
 
+        # Always-on-screen, it would permanently cover whatever content
+        # happens to scroll under this corner -- most noticeably the
+        # last few lines once scrolled to the document's end, since the
+        # overlay sits outside the ScrolledWindow's own notion of
+        # "content" entirely. Auto-hide after a moment of inactivity
+        # instead, matching the OSD convention GNOME uses for floating
+        # transient controls (volume/brightness, video player chrome):
+        # visible right after a zoom change or while the pointer is over
+        # it, gone otherwise.
+        self._zoom_revealer = Gtk.Revealer(
+            transition_type=Gtk.RevealerTransitionType.CROSSFADE, reveal_child=False
+        )
+        self._zoom_hide_source_id = 0
+        hover = Gtk.EventControllerMotion()
+        hover.connect("enter", lambda *a: self._flash_zoom_osd())
+        pill.add_controller(hover)
+        self._zoom_revealer.set_child(pill)
+
         wrapper = Gtk.Box(halign=Gtk.Align.END, valign=Gtk.Align.END)
         wrapper.set_margin_end(16)
         wrapper.set_margin_bottom(16)
-        wrapper.append(pill)
+        wrapper.append(self._zoom_revealer)
         return wrapper
+
+    def _flash_zoom_osd(self):
+        self._zoom_revealer.set_reveal_child(True)
+        if self._zoom_hide_source_id:
+            GLib.source_remove(self._zoom_hide_source_id)
+        self._zoom_hide_source_id = GLib.timeout_add(1500, self._hide_zoom_osd)
+
+    def _hide_zoom_osd(self):
+        self._zoom_hide_source_id = 0
+        self._zoom_revealer.set_reveal_child(False)
+        return GLib.SOURCE_REMOVE
 
     # -- actions / shortcuts -----------------------------------------------
 
@@ -296,6 +325,7 @@ class MdViewWindow(Adw.ApplicationWindow):
 
     def _on_zoom_changed(self, controller, factor):
         self._zoom_label.set_text(f"{round(factor * 100)}%")
+        self._flash_zoom_osd()
 
     def _on_ctrl_scroll(self, controller, dx, dy):
         state = controller.get_current_event_state()
