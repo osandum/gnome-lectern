@@ -47,9 +47,17 @@ _DARK = {
 _HEADING_SCALE = [1.8, 1.5, 1.3, 1.15, 1.05, 1.0]
 _HEADING_SPACE_ABOVE = [18, 16, 14, 12, 10, 10]
 
+# Extra space between wrapped display lines *within* one paragraph --
+# distinct from BLOCK_GAP_ABOVE/LIST_ITEM_GAP below (space *between*
+# blocks/items). GTK's default is 0, which reads as slightly cramped for
+# prose; applied via the always-on "prose" tag below (see renderer.py's
+# root RenderCtx), not per block type, since it's a base body-text
+# property everything else layers on top of.
+PROSE_LINE_SPACING = 3
+
 # Space above a top-level block (paragraph, list, blockquote, fenced code),
 # applied by the renderer to only that block's *first* buffer line -- see
-# renderer.py's _apply_block_gap. `pixels-above-lines`/`pixels-below-lines`
+# renderer.py's _apply_gap. `pixels-above-lines`/`pixels-below-lines`
 # are per-*paragraph* GTK properties, where "paragraph" means every
 # hard-newline-delimited buffer line, not "semantic Markdown block" -- a
 # tag carrying this on every line of a multi-line block (as code-block
@@ -57,16 +65,19 @@ _HEADING_SPACE_ABOVE = [18, 16, 14, 12, 10, 10]
 # producing double-spaced-looking code. One shared constant/tag for
 # "gap before the next block" avoids that, and also gives plain
 # paragraphs/lists a gap they otherwise wouldn't have at all (they carry
-# no spacing tag of their own).
-BLOCK_GAP_ABOVE = 10
+# no spacing tag of their own). Includes PROSE_LINE_SPACING on top of its
+# own base value, so the "step up" from within-paragraph line spacing to
+# between-block spacing stays proportionally consistent.
+BLOCK_GAP_ABOVE = 10 + PROSE_LINE_SPACING
 
-# Extra space between wrapped display lines *within* one paragraph --
-# distinct from BLOCK_GAP_ABOVE (space *between* paragraphs). GTK's
-# default is 0, which reads as slightly cramped for prose; applied via
-# the always-on "prose" tag below (see renderer.py's root RenderCtx),
-# not per block type, since it's a base body-text property everything
-# else layers on top of.
-PROSE_LINE_SPACING = 3
+# Space above every list item after a list's first (which gets
+# BLOCK_GAP_ABOVE instead, applied like any other top-level block) --
+# list items previously had zero separation, which read as inconsistent
+# once paragraphs/wrapped lines got their own breathing room. Kept equal
+# to PROSE_LINE_SPACING rather than BLOCK_GAP_ABOVE: items within one
+# list are a tighter-knit group than unrelated top-level blocks, closer
+# in spirit to a paragraph's own wrapped lines than to separate blocks.
+LIST_ITEM_GAP = PROSE_LINE_SPACING
 
 # Indent step, in pixels, per nesting level of list content.
 LIST_INDENT_STEP = 24
@@ -145,6 +156,7 @@ def tag_style_props(dark):
         # line, never its interior lines, so it can't stack the way
         # code-block's own pixels-above/below-lines used to.
         "block-gap": {"pixels-above-lines": BLOCK_GAP_ABOVE},
+        "list-item-gap": {"pixels-above-lines": LIST_ITEM_GAP},
         "blockquote": {
             "left-margin": BLOCKQUOTE_INDENT,
             "foreground-rgba": _rgba(palette["dim"]),

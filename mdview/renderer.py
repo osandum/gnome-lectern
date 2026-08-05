@@ -157,7 +157,7 @@ class MarkdownRenderer:
         start_mark = buffer.create_mark(None, it, True) if needs_gap else None
         self._dispatch_block_node(t, child, buffer, it, ctx)
         if start_mark is not None:
-            self._apply_block_gap(buffer, start_mark)
+            self._apply_gap(buffer, start_mark, "block-gap")
         self._emitted_any_block = True
 
     def _dispatch_block_node(self, t, child, buffer, it, ctx):
@@ -182,12 +182,16 @@ class MarkdownRenderer:
         # scope cut, not requested.
 
     @staticmethod
-    def _apply_block_gap(buffer, start_mark):
+    def _apply_gap(buffer, start_mark, tag_name):
+        """Apply `tag_name` (pixels-above-lines only -- see tags.py) to
+        just the first buffer line starting at `start_mark`. Shared by
+        block-gap (between top-level blocks) and list-item-gap (between
+        items within one list) -- same mechanism, different tag/scope."""
         start_iter = buffer.get_iter_at_mark(start_mark)
         end_iter = start_iter.copy()
         if not end_iter.ends_line():
             end_iter.forward_to_line_end()
-        buffer.apply_tag_by_name("block-gap", start_iter, end_iter)
+        buffer.apply_tag_by_name(tag_name, start_iter, end_iter)
         buffer.delete_mark(start_mark)
 
     def _emit_simple_paragraph(self, node, buffer, it, ctx, extra_tag=None):
@@ -257,8 +261,17 @@ class MarkdownRenderer:
         level = sum(1 for t in ctx.block_tags if t.startswith("list-indent-"))
         indent_tag = tagdefs.ensure_list_indent_tag(self.tag_table, level)
         child_ctx = ctx.push_block(indent_tag.get_property("name"))
-        for item in node.children:
+        for index, item in enumerate(node.children):
+            # The list's first item gets its "space above" from the
+            # enclosing block-gap wrap in _walk_block_node instead (this
+            # whole list is itself the top-level block that gap applies
+            # to) -- every item after that needs its own, smaller gap,
+            # since items were previously packed with zero separation.
+            needs_gap = index > 0
+            start_mark = buffer.create_mark(None, it, True) if needs_gap else None
             self._walk_list_item(item, buffer, it, child_ctx, ordered)
+            if start_mark is not None:
+                self._apply_gap(buffer, start_mark, "list-item-gap")
 
     def _walk_list_item(self, item, buffer, it, ctx, ordered):
         is_task = bool(item.attrs) and "task-list-item" in str(item.attrs.get("class", ""))
