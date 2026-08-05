@@ -138,7 +138,17 @@ def tag_style_props(dark):
             "foreground-rgba": _rgba(palette["dim"]),
             "style": Pango.Style.ITALIC,
         },
-        "list-marker": {"foreground-rgba": _rgba(palette["dim"])},
+        # "tnum" (OpenType tabular numerals) makes every digit render at
+        # the same fixed width -- without it, digit "1" commonly renders
+        # visibly narrower than "2"-"9" in proportional UI fonts, so two
+        # same-length ordered-list markers (e.g. "1." and "2.") can end up
+        # different pixel widths, offsetting where their item text starts
+        # even though nothing else about them differs. (A generalized
+        # Pango-tab-stop-based fix for the further case of *different*
+        # digit counts, e.g. "9." vs "10.", was tried and reverted: it
+        # broke wrapped continuation-line alignment for multi-line items,
+        # a worse regression than the one it fixed.)
+        "list-marker": {"foreground-rgba": _rgba(palette["dim"]), "font-features": "tnum 1"},
         "link": {
             "foreground-rgba": _rgba(palette["link"]),
             "underline": Pango.Underline.SINGLE,
