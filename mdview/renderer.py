@@ -78,10 +78,18 @@ class MarkdownRenderer:
     def attach_pending_widgets(self, textview):
         """Must be called after render() and after the buffer is assigned
         to the view -- Gtk.TextView.add_child_at_anchor requires a realized
-        text view/buffer pairing that create_child_anchor doesn't."""
+        text view/buffer pairing that create_child_anchor doesn't. Returns
+        the attached widgets that need to track the view's content width
+        (hr separators, table frames) -- see window.py's width-sync
+        handler for why: Gtk.TextView never stretches anchored children to
+        fill the line the way hexpand does in an ordinary container, no
+        matter what's set on the widget itself, so something external has
+        to actively push a width onto them."""
+        fill_width_widgets = [widget for _anchor, widget in self._pending_anchors]
         for anchor, widget in self._pending_anchors:
             textview.add_child_at_anchor(widget, anchor)
         self._pending_anchors = []
+        return fill_width_widgets
 
     def footnote_def_mark_name(self, label):
         return self._footnote_def_marks.get(label)

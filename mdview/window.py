@@ -97,6 +97,21 @@ class MdViewWindow(Adw.ApplicationWindow):
         )
         self._scrolled.set_child(self._textview)
 
+        # Gtk.TextView never stretches an anchored child widget to fill
+        # the line -- hexpand/halign on the widget itself are silently
+        # ignored, confirmed empirically -- so table frames and hr
+        # separators (mdview's only two anchored widget kinds) would
+        # otherwise sit at their own tiny natural width forever, in a sea
+        # of unused space, and never react to the window being resized.
+        # The adjustment's page-size is the one reliable, signal-based way
+        # to observe the view's actual content width changing (Gtk.Widget
+        # itself has no public size-change signal in GTK4); connecting
+        # here, before the window is ever presented, also catches the
+        # initial layout pass, so newly opened documents get correctly
+        # sized tables immediately, not just after the first resize.
+        self._fill_width_widgets = []
+        self._textview.get_hadjustment().connect("notify::page-size", self._on_content_width_changed)
+
         self._zoom = ZoomController(self._textview)
         self._find = FindController(self._textview)
 
@@ -257,6 +272,26 @@ class MdViewWindow(Adw.ApplicationWindow):
         text = f"{self._find.current_position} / {count}" if count else "No matches"
         self._find_label.set_text(text if self._search_entry.get_text() else "")
 
+    # -- anchored-widget width sync ---------------------------------------
+
+    def _on_content_width_changed(self, hadjustment, pspec):
+        self._sync_fill_width_widgets()
+
+    def _sync_fill_width_widgets(self):
+        # page-size is the raw viewport width, not reduced by the
+        # TextView's own left/right margins (confirmed empirically -- it
+        # does NOT subtract them), so that has to happen here to match
+        # the width normal text actually wraps to.
+        usable = (
+            self._textview.get_hadjustment().get_page_size()
+            - self._textview.get_left_margin()
+            - self._textview.get_right_margin()
+        )
+        if usable <= 0:
+            return  # not yet laid out
+        for widget in self._fill_width_widgets:
+            widget.set_size_request(round(usable), -1)
+
     # -- zoom ------------------------------------------------------------
 
     def _on_zoom_changed(self, controller, factor):
@@ -374,7 +409,8 @@ class MdViewWindow(Adw.ApplicationWindow):
         self._renderer = MarkdownRenderer()
         self._renderer.render(self._document.tree, buffer)
         self._textview.set_buffer(buffer)
-        self._renderer.attach_pending_widgets(self._textview)
+        self._fill_width_widgets = self._renderer.attach_pending_widgets(self._textview)
+        self._sync_fill_width_widgets()
         self._find = FindController(self._textview)
         self._sync_find_label()
 
