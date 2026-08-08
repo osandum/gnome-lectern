@@ -49,7 +49,22 @@ leaves it showing a blank tile, since `Icon=` names a themed icon rather
 than a file path.
 
 Nothing under `data/` is installed by `pip install -e .` — `pyproject.toml`
-ships only the Python package. Packaging that properly is still open.
+ships only the Python package. The Flatpak build installs them explicitly;
+for a plain `pip` install you copy them yourself, as above.
+
+## Building the Flatpak
+
+```sh
+flatpak install flathub org.gnome.Platform//50 org.gnome.Sdk//50
+flatpak-builder --user --install --force-clean build \
+    build-aux/io.github.osandum.Lectern.yml
+flatpak run io.github.osandum.Lectern
+```
+
+The manifest takes its sources from the local checkout, so it builds
+straight from a clone. Submitting to Flathub needs that swapped for a
+git source pinned to a tag and commit — there's a comment in the manifest
+marking the spot.
 
 ## Tests
 

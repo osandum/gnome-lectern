@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Ole Sandum -->
+<component type="desktop-application">
+  <id>io.github.osandum.Lectern</id>
+
+  <name>Lectern</name>
+  <summary>Read Markdown documents</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+
+  <developer id="io.github.osandum">
+    <name>Ole Sandum</name>
+  </developer>
+
+  <description>
+    <p>
+      Lectern opens a Markdown file and shows it, the way a document viewer
+      shows a PDF. There is no editing interface and no sidebar: open a file,
+      read it, search it, print it.
+    </p>
+    <p>
+      Documents are rendered with native GTK widgets rather than an embedded
+      browser engine, so the app starts instantly and the text behaves like
+      text everywhere else in the desktop.
+    </p>
+    <p>Supported:</p>
+    <ul>
+      <li>CommonMark and GitHub-Flavored Markdown: tables, task lists, footnotes and strikethrough</li>
+      <li>Fenced code blocks with syntax highlighting</li>
+      <li>Images, including inside tables</li>
+      <li>Find, with whole-word and case-sensitive options, that searches table cells too</li>
+      <li>Zoom, printing and print preview</li>
+      <li>Automatic reload when the file changes on disk, keeping your place</li>
+    </ul>
+    <p>
+      Images hosted on the web are not fetched when a document is opened.
+      Opening a file should not tell whoever hosts its images that you opened
+      it, so remote images load only when you ask for them.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.osandum.Lectern.desktop</launchable>
+
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/osandum/gnome-lectern/main/data/screenshots/01-reading.png</image>
+      <caption>A document with a table, task list and highlighted code</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/osandum/gnome-lectern/main/data/screenshots/02-code-and-tables.png</image>
+      <caption>Fenced code blocks are syntax highlighted</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/osandum/gnome-lectern/main/data/screenshots/03-find.png</image>
+      <caption>Find matches text inside table cells as well as body text</caption>
+    </screenshot>
+  </screenshots>
+
+  <url type="homepage">https://github.com/osandum/gnome-lectern</url>
+  <url type="bugtracker">https://github.com/osandum/gnome-lectern/issues</url>
+  <url type="vcs-browser">https://github.com/osandum/gnome-lectern</url>
+
+  <content_rating type="oars-1.1"/>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#e6d4c0</color>
+    <color type="primary" scheme_preference="dark">#4a3524</color>
+  </branding>
+
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+  </supports>
+
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+
+  <releases>
+    <release version="0.1.0" date="2026-08-08">
+      <description>
+        <p>First release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

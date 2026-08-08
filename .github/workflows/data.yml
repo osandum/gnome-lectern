@@ -22,10 +22,32 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            desktop-file-utils librsvg2-bin
+            desktop-file-utils librsvg2-bin appstream
 
       - name: Desktop entry is valid
         run: desktop-file-validate data/*.desktop
+
+      # Flathub rejects invalid metainfo outright, so catching it here beats
+      # catching it at submission. Screenshot URLs point at raw.github, so
+      # this also fails if a screenshot is renamed without updating them.
+      - name: AppStream metainfo is valid
+        run: appstreamcli validate --explain data/*.metainfo.xml
+
+      - name: Flatpak manifest parses and stays in sync with the app ID
+        run: |
+          python3 - <<'PY'
+          import glob, yaml
+          path = "build-aux/io.github.osandum.Lectern.yml"
+          m = yaml.safe_load(open(path))
+          desktop = glob.glob("data/*.desktop")[0].split("/")[-1][: -len(".desktop")]
+          assert m["id"] == desktop, f'manifest id {m["id"]} != desktop entry {desktop}'
+          assert m["command"], "manifest has no command"
+          for mod in m["modules"]:
+              for src in mod.get("sources", []):
+                  if src.get("type") == "file":
+                      assert src.get("sha256"), f'unpinned source: {src.get("url")}'
+          print(f"{path}: ok, id={m['id']}, runtime {m['runtime']} {m['runtime-version']}")
+          PY
 
       - name: SVGs are well-formed XML
         run: |
