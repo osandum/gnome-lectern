@@ -27,6 +27,7 @@ class LecternWindow(Adw.ApplicationWindow):
 
         self._build_ui()
         self._install_actions()
+        self._sync_window_title()
 
         if gfile is not None:
             self._open_file(gfile)
@@ -485,6 +486,25 @@ class LecternWindow(Adw.ApplicationWindow):
         self._watcher.connect("reload-needed", self._on_reload_needed)
         self._watcher.connect("file-missing", self._on_file_missing)
 
+    def _sync_window_title(self):
+        """Set Gtk.Window's own title, which is what the shell's window
+        list and Alt-Tab read.
+
+        The headerbar's Adw.WindowTitle is a *widget* and setting it does
+        nothing for the window property, so before this every window
+        reported no title at all and the shell fell back to the
+        application name -- leaving several open documents all listed
+        identically as "Lectern".
+
+        No " - Lectern" suffix: the GNOME HIG wants a window titled after
+        its document, and the shell already shows which application the
+        window belongs to.
+        """
+        if self._document is None:
+            self.set_title("Lectern")
+            return
+        self.set_title(self._document.title or self._document.basename)
+
     def _show_load_error(self, message):
         status = Adw.StatusPage(
             title="Couldn’t Open File", description=message, icon_name="dialog-error-symbolic"
@@ -502,6 +522,9 @@ class LecternWindow(Adw.ApplicationWindow):
         self._fill_width_widgets = self._renderer.attach_pending_widgets(self._textview)
         self._sync_fill_width_widgets()
         self._sync_remote_images_banner()
+        # Here rather than in _open_file, so a reload that changed the
+        # document's first heading retitles the window too.
+        self._sync_window_title()
         for label in self._renderer.table_link_labels:
             label.connect("activate-link", self._on_table_link_activated)
         self._find = FindController(self._textview, self._renderer.tables)

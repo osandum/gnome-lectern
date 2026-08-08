@@ -50,6 +50,27 @@ class Document:
         parent = self.gfile.get_parent()
         return parent.get_path() if parent else None
 
+    @property
+    def title(self):
+        """The document's own title: the text of its first level-1
+        heading, or None if it hasn't got one. Used for the window title,
+        so several open documents are told apart in the shell's window
+        list -- which shows window titles, and otherwise falls back to
+        the application name for every one of them.
+
+        Only h1, and only the first: a document that opens with an h2 has
+        no title in the sense meant here, and guessing from a lower level
+        would promote a section heading into the document's name.
+        """
+        from . import tables
+
+        if self.tree is None:
+            return None
+        for node in self.tree.children:
+            if node.type == "heading" and node.tag == "h1":
+                return tables.inline_plain_text(node) or None
+        return None
+
     def load(self):
         """(Re)read the file from disk and re-parse it. Raises
         DocumentLoadError on failure, leaving the previous self.text/tree
