@@ -11,9 +11,10 @@ lengths are computed explicitly throughout rather than assumed to match
 """
 import gi
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Pango", "1.0")
 gi.require_version("PangoCairo", "1.0")
-from gi.repository import Gtk, Pango, PangoCairo
+from gi.repository import Gtk, Gdk, Pango, PangoCairo
 
 from . import tags as tagdefs
 from . import tables as tabledefs
@@ -24,6 +25,11 @@ HR_BLOCK_HEIGHT_PT = 16.0
 TABLE_CELL_PAD_PT = 6.0
 TABLE_ROW_GAP_PT = 6.0
 TABLE_RULE_RGB = (0.7, 0.7, 0.7)
+# Image pixels are nominally 96dpi; print units are 72dpi points.
+IMAGE_PX_TO_PT = 72.0 / 96.0
+# Cap on how much of one page a single image may claim, so a very tall
+# image leaves room for something else rather than owning a page outright.
+IMAGE_MAX_PAGE_FRACTION = 0.9
 
 # Only run-level (character-range) properties translate to Pango
 # attributes; margins/backgrounds/pixel-spacing are block-level concerns
@@ -158,6 +164,8 @@ class _Block:
         self.lines = None
         self.rows = None
         self.col_widths = None
+        self.pixbuf = None
+        self.draw_size = None
         self.height = 0.0
 
     @classmethod
@@ -175,6 +183,14 @@ class _Block:
         return block
 
     @classmethod
+    def image(cls, x, pixbuf, width, height):
+        block = cls("image", x)
+        block.pixbuf = pixbuf
+        block.draw_size = (width, height)
+        block.height = height
+        return block
+
+    @classmethod
     def table(cls, x, row_layouts, row_heights, col_widths):
         block = cls("table", x)
         block.rows = (row_layouts, row_heights)
@@ -183,10 +199,57 @@ class _Block:
         return block
 
 
-def _build_blocks(context, style_table, print_model, page_width):
+class _AltTextItem:
+    """Stands in for an image that has no pixels to print -- one that
+    failed, or a remote one the reader never chose to load. Printing the
+    alt text keeps the page honest about what was meant to be there
+    instead of leaving an unexplained gap."""
+    __slots__ = ("runs", "block_tags", "language", "kind")
+
+    def __init__(self, alt, block_tags):
+        self.kind = "paragraph"
+        # Italic rather than a dim colour: there's no "dim" entry in
+        # tag_style_props, and italic alt text is the conventional way to
+        # show it anyway.
+        self.runs = [(f"[{alt}]", ["em"])]
+        self.block_tags = block_tags
+        self.language = None
+
+
+def _image_draw_size(pixbuf, max_width_pt, max_height_pt):
+    """Point size to draw at: the image's own 96dpi size, shrunk to fit
+    the column, then shrunk again if it's still too tall for a page.
+    Never enlarged -- a 32px icon blown up to column width looks broken."""
+    natural_w = pixbuf.get_width() * IMAGE_PX_TO_PT
+    natural_h = pixbuf.get_height() * IMAGE_PX_TO_PT
+    if natural_w <= 0 or natural_h <= 0:
+        return None
+    scale = min(1.0, max_width_pt / natural_w, max_height_pt / natural_h)
+    return natural_w * scale, natural_h * scale
+
+
+def _build_blocks(context, style_table, print_model, page_width, page_height):
     blocks = []
     for item in print_model:
-        if item.kind in ("paragraph", "code-block"):
+        if item.kind == "image":
+            x = _left_margin_pt(item.block_tags)
+            # Read the texture now, at print time, rather than at render
+            # time -- a remote image the reader loaded after opening the
+            # document has pixels by now and should print.
+            texture = item.image.texture if item.image is not None else None
+            pixbuf = Gdk.pixbuf_get_from_texture(texture) if texture is not None else None
+            size = _image_draw_size(
+                pixbuf, page_width - x, page_height * IMAGE_MAX_PAGE_FRACTION
+            ) if pixbuf is not None else None
+            if size is not None:
+                blocks.append(_Block.image(x, pixbuf, size[0], size[1]))
+            else:
+                alt = item.image.alt if item.image is not None else "image"
+                layout = _build_text_layout(
+                    context, style_table, _AltTextItem(alt, item.block_tags), page_width - x
+                )
+                blocks.append(_Block.text(x, layout))
+        elif item.kind in ("paragraph", "code-block"):
             x = _left_margin_pt(item.block_tags)
             layout = _build_text_layout(context, style_table, item, page_width - x)
             blocks.append(_Block.text(x, layout))
@@ -226,6 +289,17 @@ def _paginate(blocks, page_height):
                 new_page()
                 gap = 0.0
             current.append({"type": "hr", "y": y + gap + block.height / 2})
+            y += gap + block.height
+        elif block.kind == "image":
+            # Atomic like hr -- an image is never sliced across a page
+            # break; _image_draw_size already guaranteed it fits on one.
+            if y + gap + block.height > page_height and current:
+                new_page()
+                gap = 0.0
+            current.append({
+                "type": "image", "x": block.x, "y": y + gap,
+                "pixbuf": block.pixbuf, "size": block.draw_size,
+            })
             y += gap + block.height
         elif block.kind == "table":
             if current and _out_of_room(y, gap, page_height):
@@ -324,6 +398,18 @@ def _draw_entry(cr, entry, page_width):
                 cr.line_to(x0 + sum(col_widths[:len(cell_layouts)]), rule_y)
                 cr.stroke()
                 cr.restore()
+    elif entry["type"] == "image":
+        pixbuf = entry["pixbuf"]
+        width, height = entry["size"]
+        cr.save()
+        cr.translate(entry["x"], entry["y"])
+        # Gdk.cairo_set_source_pixbuf places the image at its pixel size,
+        # so the scale to point-size has to be on the matrix, not on the
+        # source.
+        cr.scale(width / pixbuf.get_width(), height / pixbuf.get_height())
+        Gdk.cairo_set_source_pixbuf(cr, pixbuf, 0, 0)
+        cr.paint()
+        cr.restore()
     elif entry["type"] == "layout":
         for line, _y_top, _height, baseline in entry["lines"]:
             cr.move_to(entry["x"], entry["y"] + (baseline - entry["origin_baseline"]))
@@ -348,7 +434,7 @@ class PrintCoordinator:
         style_table = tagdefs.tag_style_props(dark)
         width, height = context.get_width(), context.get_height()
         state["width"] = width
-        blocks = _build_blocks(context, style_table, print_model, width)
+        blocks = _build_blocks(context, style_table, print_model, width, height)
         # Pango.LayoutLine keeps only a *weak* back-reference to its parent
         # Pango.Layout -- without this, `blocks` (and therefore every
         # Layout) would be garbage collected the moment this method

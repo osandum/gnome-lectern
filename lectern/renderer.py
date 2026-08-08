@@ -15,6 +15,7 @@ from gi.repository import Gtk
 from . import tags as tagdefs
 from . import tables
 from . import highlighting
+from . import images as imagelib
 
 # Inline node types that just wrap their children in one more tag, with no
 # other behavior -- driven by a table instead of three near-identical
@@ -34,14 +35,18 @@ def _task_checkbox_state(html_inline_content):
 
 
 class PrintItem:
-    __slots__ = ("kind", "runs", "block_tags", "rows", "language")
+    __slots__ = ("kind", "runs", "block_tags", "rows", "language", "image")
 
-    def __init__(self, kind, runs=None, block_tags=None, rows=None, language=None):
+    def __init__(self, kind, runs=None, block_tags=None, rows=None, language=None, image=None):
         self.kind = kind
         self.runs = runs or []
         self.block_tags = block_tags or []
         self.rows = rows
         self.language = language
+        # For "image": the live images.ImageView. Printing reads its
+        # texture at print time rather than at render time, so an image
+        # the reader loaded after opening the document still prints.
+        self.image = image
 
 
 class RenderCtx:
@@ -79,18 +84,25 @@ class MarkdownRenderer:
         # findbar.py uses this to search and highlight table-cell text,
         # which never enters the TextBuffer.
         self.tables = []
+        # images.ImageView per rendered image, for window.py to width-sync
+        # and (for http(s) ones) to load on demand.
+        self.images = []
         self._footnote_ref_marks = {}   # label -> mark name
         self._footnote_def_marks = {}   # label -> mark name
         self._pending_anchors = []      # (anchor, widget) drained by caller
         self._instance_counter = 0
         self._emitted_any_block = False
         self._link_color = tagdefs.link_color_hex(dark=False)  # overwritten by render()
+        self._base_dir = None                                  # ditto
 
     # -- public API ---------------------------------------------------
 
-    def render(self, tree, buffer, dark=False):
+    def render(self, tree, buffer, dark=False, base_dir=None):
         self.tag_table = buffer.get_tag_table()
         self._link_color = tagdefs.link_color_hex(dark)
+        # Directory the document lives in, for resolving relative image
+        # paths -- the same base window.py resolves relative links against.
+        self._base_dir = base_dir
         it = buffer.get_start_iter()
         # "prose" carries only pixels-inside-wrap (see tags.py) -- seeding
         # it into the root context means every push_block() descendant
@@ -107,8 +119,15 @@ class MarkdownRenderer:
         handler for why: Gtk.TextView never stretches anchored children to
         fill the line the way hexpand does in an ordinary container, no
         matter what's set on the widget itself, so something external has
-        to actively push a width onto them."""
-        fill_width_widgets = [widget for _anchor, widget in self._pending_anchors]
+        to actively push a width onto them.
+
+        Images are excluded: they want the available width as a *ceiling*
+        to scale down to, not as a size to fill, so window.py drives them
+        through ImageView.set_available_width instead."""
+        fill_width_widgets = [
+            widget for _anchor, widget in self._pending_anchors
+            if not isinstance(widget, imagelib.ImageView)
+        ]
         for anchor, widget in self._pending_anchors:
             textview.add_child_at_anchor(widget, anchor)
         self._pending_anchors = []
@@ -261,6 +280,38 @@ class MarkdownRenderer:
         buffer.insert(it, "\n")
         self.print_model.append(PrintItem("table", rows=rows, block_tags=list(ctx.block_tags)))
 
+    def _emit_image(self, node, buffer, it, block_tags):
+        """Images are inline nodes, so the anchor goes wherever the image
+        sat in the text -- an image alone in its paragraph reads as a
+        block, one mid-sentence stays in the line, and Gtk.TextView's own
+        line flow handles both without either case being special-cased.
+
+        `alt` comes from flattening the node's children, not from the
+        `alt` attribute (markdown-it leaves that empty) and not from
+        `content` either -- content is the *raw* alt source, so
+        `![a *b*](x)` would show its asterisks.
+
+        Known print limitation: the image's PrintItem lands in
+        print_model as its own block, appended the moment the inline walk
+        reaches it -- but a paragraph's own PrintItem isn't appended until
+        the whole paragraph has been walked. So an image *inside* a
+        paragraph prints above that paragraph rather than within it.
+        Harmless for the overwhelmingly common "image alone in its own
+        paragraph" case, which is why it's left alone: fixing it means
+        splitting a paragraph's runs around the image and emitting several
+        PrintItems per paragraph. On screen the ordering is always right,
+        since there the anchor sits in the text flow itself.
+        """
+        src = node.attrs.get("src", "")
+        alt = tables.inline_plain_text(node)
+        view = imagelib.ImageView(src, alt, self._base_dir)
+        anchor = buffer.create_child_anchor(it)
+        self.images.append(view)
+        self._pending_anchors.append((anchor, view))
+        self.print_model.append(
+            PrintItem("image", block_tags=list(block_tags), image=view)
+        )
+
     # -- lists / task lists -----------------------------------------------
 
     def _walk_list(self, node, buffer, it, ctx, ordered):
@@ -378,6 +429,8 @@ class MarkdownRenderer:
                 tagname = self._new_instance_tag("link")
                 self.dispatch_targets[tagname] = {"type": "url", "href": child.attrs.get("href", "")}
                 self._walk_inline(child, buffer, it, block_tags, inline_tags + ["link", tagname], runs)
+            elif t == "image":
+                self._emit_image(child, buffer, it, block_tags)
             elif t == "footnote_ref":
                 self._emit_footnote_ref(child, buffer, it, block_tags, inline_tags, runs)
             elif t == "footnote_anchor":

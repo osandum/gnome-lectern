@@ -53,7 +53,12 @@ def column_char_weights(rows):
     return weights
 
 
-def _cell_text(cell_node):
+def inline_plain_text(node):
+    """Flatten an inline subtree to plain text. Written for table cells,
+    but the same job comes up for an image's alt text (renderer.py) --
+    markdown-it leaves an image node's `content` as the *raw* alt source,
+    so `![a *b*](x)` would otherwise show its asterisks.
+    """
     parts = []
 
     def walk(node):
@@ -73,7 +78,7 @@ def _cell_text(cell_node):
             for child in node.children:
                 walk(child)
 
-    walk(cell_node)
+    walk(node)
     return "".join(parts).strip()
 
 
@@ -89,7 +94,7 @@ def _iter_rows(table_node):
 
 def extract_rows(table_node):
     """Return list[list[str]] of cell text, header row(s) included first."""
-    return [[_cell_text(cell) for cell in cells] for cells in _iter_rows(table_node)]
+    return [[inline_plain_text(cell) for cell in cells] for cells in _iter_rows(table_node)]
 
 
 def _cell_markup(cell_node, link_color, highlights=()):
@@ -229,7 +234,7 @@ def build_table_widget(table_node, link_color):
     findbar.py can search and highlight this widget-based text too.
     """
     cell_rows = list(_iter_rows(table_node))
-    rows = [[_cell_text(cell) for cell in cells] for cells in cell_rows]
+    rows = [[inline_plain_text(cell) for cell in cells] for cells in cell_rows]
     col_weights = column_char_weights(rows)
     # Thin horizontal rules between rows (header included) rather than a
     # full per-cell grid -- a per-cell Gtk.Frame was tried and rejected:

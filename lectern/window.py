@@ -43,6 +43,14 @@ class LecternWindow(Adw.ApplicationWindow):
         self._toast_overlay.set_child(self._toolbar_view)
         self._toolbar_view.add_top_bar(self._build_headerbar())
 
+        # Remote images are not fetched on open -- opening a document
+        # shouldn't tell whoever hosts its images that you opened it, and
+        # a per-image URL is a serviceable read receipt. This banner is
+        # the opt-in, per document.
+        self._remote_images_banner = Adw.Banner(button_label="Load")
+        self._remote_images_banner.connect("button-clicked", self._on_load_remote_images)
+        self._toolbar_view.add_top_bar(self._remote_images_banner)
+
         self._content_overlay = Gtk.Overlay()
         self._toolbar_view.set_content(self._content_overlay)
 
@@ -110,6 +118,7 @@ class LecternWindow(Adw.ApplicationWindow):
         # initial layout pass, so newly opened documents get correctly
         # sized tables immediately, not just after the first resize.
         self._fill_width_widgets = []
+        self._images = []
         self._textview.get_hadjustment().connect("notify::page-size", self._on_content_width_changed)
 
         self._zoom = ZoomController(self._textview)
@@ -301,6 +310,23 @@ class LecternWindow(Adw.ApplicationWindow):
         text = f"{self._find.current_position} / {count}" if count else "No matches"
         self._find_label.set_text(text if self._search_entry.get_text() else "")
 
+    # -- remote images ----------------------------------------------------
+
+    def _sync_remote_images_banner(self):
+        pending = [img for img in self._images if img.remote]
+        self._remote_images_banner.set_revealed(bool(pending))
+        if pending:
+            count = len(pending)
+            noun = "image" if count == 1 else "images"
+            self._remote_images_banner.set_title(
+                f"This document contains {count} remote {noun}, not loaded"
+            )
+
+    def _on_load_remote_images(self, banner):
+        for image in self._images:
+            image.load_remote()
+        self._remote_images_banner.set_revealed(False)
+
     # -- anchored-widget width sync ---------------------------------------
 
     def _on_content_width_changed(self, hadjustment, pspec):
@@ -320,6 +346,10 @@ class LecternWindow(Adw.ApplicationWindow):
             return  # not yet laid out
         for widget in self._fill_width_widgets:
             widget.set_size_request(round(usable), -1)
+        # Images take the same number as a ceiling to scale down to,
+        # rather than a width to fill -- see ImageView._apply_size.
+        for image in self._images:
+            image.set_available_width(round(usable))
 
     # -- zoom ------------------------------------------------------------
 
@@ -465,10 +495,13 @@ class LecternWindow(Adw.ApplicationWindow):
         dark = self._style_manager.get_dark()
         buffer = Gtk.TextBuffer(tag_table=tagdefs.create_tag_table(dark))
         self._renderer = MarkdownRenderer()
-        self._renderer.render(self._document.tree, buffer, dark=dark)
+        base_dir = self._document.gfile.get_parent() if self._document else None
+        self._renderer.render(self._document.tree, buffer, dark=dark, base_dir=base_dir)
         self._textview.set_buffer(buffer)
+        self._images = self._renderer.images
         self._fill_width_widgets = self._renderer.attach_pending_widgets(self._textview)
         self._sync_fill_width_widgets()
+        self._sync_remote_images_banner()
         for label in self._renderer.table_link_labels:
             label.connect("activate-link", self._on_table_link_activated)
         self._find = FindController(self._textview, self._renderer.tables)
