@@ -1,0 +1,57 @@
+name: Data files
+
+# Cheap checks over the things that ship alongside the code and that the
+# test suite can't see. Both categories here have already broken once:
+# an SVG with `--` inside an XML comment (illegal, and the `--`-as-dash
+# style used elsewhere in this codebase invites it), and a desktop entry
+# whose Icon= named an icon that nothing installed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            desktop-file-utils librsvg2-bin
+
+      - name: Desktop entry is valid
+        run: desktop-file-validate data/*.desktop
+
+      - name: SVGs are well-formed XML
+        run: |
+          shopt -s globstar nullglob
+          for f in data/**/*.svg tests/fixtures/**/*.svg; do
+            python3 -c "import sys, xml.dom.minidom; xml.dom.minidom.parse(sys.argv[1])" "$f"
+            echo "well-formed: $f"
+          done
+
+      - name: SVGs render through librsvg
+        run: |
+          shopt -s globstar nullglob
+          for f in data/**/*.svg tests/fixtures/**/*.svg; do
+            rsvg-convert -w 128 -h 128 "$f" -o /dev/null
+            echo "renders: $f"
+          done
+
+      # Icon= names a *themed* icon, not a path, so a typo or a missing
+      # file shows up only as a blank tile on someone else's machine.
+      - name: Desktop entry's Icon= is actually shipped
+        run: |
+          icon=$(grep -h '^Icon=' data/*.desktop | cut -d= -f2-)
+          test -n "$icon" || { echo "no Icon= in the desktop entry"; exit 1; }
+          if find data/icons -name "$icon.svg" -print -quit | grep -q .; then
+            echo "Icon=$icon is shipped"
+          else
+            echo "Icon=$icon has no matching file under data/icons/"
+            exit 1
+          fi

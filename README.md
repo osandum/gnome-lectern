@@ -1,5 +1,8 @@
 # Lectern
 
+[![Tests](https://github.com/osandum/gnome-lectern/actions/workflows/tests.yml/badge.svg)](https://github.com/osandum/gnome-lectern/actions/workflows/tests.yml)
+[![License: GPL-2.0-or-later](https://img.shields.io/badge/License-GPL--2.0--or--later-blue.svg)](LICENSE)
+
 A read-only, [Papers](https://apps.gnome.org/da/Papers/)-style Markdown
 viewer for GNOME: open a `.md` file, read it, search/zoom/print it. No
 editing UI.
@@ -54,8 +57,9 @@ ships only the Python package. Packaging that properly is still open.
 pytest tests/
 ```
 
-The renderer tests are headless (no display required) — `Gtk.TextBuffer`
-manipulation only needs GTK initialized, not a realized window.
+The tests are headless — `Gtk.TextBuffer` manipulation and widget
+construction only need GTK initialized, not a realized window. Verified
+with `DISPLAY` and `WAYLAND_DISPLAY` both unset, so CI needs no `xvfb`.
 
 ## Status
 
