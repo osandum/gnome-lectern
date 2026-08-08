@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-mdview: a read-only, [Papers](https://apps.gnome.org/da/Papers/)-style Markdown viewer for GNOME. Open a `.md` file, read/search/zoom/print it — no editing UI. One window per opened file, no sidebar (deliberate departures/similarities to Papers/Evince, not accidents).
+Lectern: a read-only, [Papers](https://apps.gnome.org/da/Papers/)-style Markdown viewer for GNOME. Open a `.md` file, read/search/zoom/print it — no editing UI. One window per opened file, no sidebar (deliberate departures/similarities to Papers/Evince, not accidents).
 
 ## Commands
 
@@ -16,14 +16,14 @@ source .venv/bin/activate
 pip install -e .
 
 # Run
-mdview path/to/file.md
+lectern path/to/file.md
 
 # Test (headless, no display needed -- see Architecture below)
 pytest tests/
 pytest tests/test_renderer.py::test_bold_produces_strong_tag  # single test
 
 # Manual smoke test fixture exercising every Markdown feature:
-mdview tests/fixtures/kitchen_sink.md
+lectern tests/fixtures/kitchen_sink.md
 ```
 
 There is no linter or formatter configured in this repo.
@@ -35,7 +35,7 @@ There is no linter or formatter configured in this repo.
 **Critical, non-obvious GTK behavior:** `Gtk.TextView` never stretches an anchored child widget to fill the line — `hexpand`/`halign` on the widget are silently ignored, no matter how they're set. This bit us once already (tables/hr rendering narrow and non-responsive to resize). The fix, and the pattern to follow for any future anchored widget: track it and actively push a width onto it via `window.py`'s `_sync_fill_width_widgets`, driven by the `TextView`'s `hadjustment` `page-size` (the one reliable signal for "the view's content width changed" — `Gtk.Widget` has no public size-change signal in GTK4).
 
 **Module responsibilities:**
-- `document.py` — file I/O + Markdown parsing (`markdown-it-py` + `mdit-py-plugins` for GFM tables/strikethrough/footnotes/tasklists). Imports of `markdown_it`/`pygments` are deliberately deferred into function bodies here and in `highlighting.py`, not at module top level — a bare `mdview` launch or an argument error shouldn't pay for parsing/highlighting machinery it never uses.
+- `document.py` — file I/O + Markdown parsing (`markdown-it-py` + `mdit-py-plugins` for GFM tables/strikethrough/footnotes/tasklists). Imports of `markdown_it`/`pygments` are deliberately deferred into function bodies here and in `highlighting.py`, not at module top level — a bare `lectern` launch or an argument error shouldn't pay for parsing/highlighting machinery it never uses.
 - `renderer.py` — walks the `markdown_it.tree.SyntaxTreeNode` tree into the `Gtk.TextBuffer`. Every block-level emission *also* appends a `PrintItem` to `self.print_model` in the same pass. This dual-write exists because `Gtk.TextChildAnchor`-embedded content (tables) is invisible to buffer-native search and can't be reconstructed by re-walking the buffer afterward (it's a single object-replacement character in the text stream) — `printing.py` works off `print_model` exclusively, never off the live buffer.
 - `tags.py` — the single source of truth for `Gtk.TextTag` style properties (`tag_style_props`), consumed by both the live buffer (screen) and `printing.py` (paper), so the two can't visually drift apart. Also owns light/dark palettes and re-colors tags in place on theme change.
 - `tables.py` — table subtree → `Gtk.Grid` (screen) + row-text extraction (print). Column widths are weighted by *median* character length per column (`column_char_weights`), shared by both the on-screen `Gtk.Label.max_width_chars` hint and print's proportional pt-width split — one heuristic, not two independently-tuned ones. Median, not mean/max, so one outlier cell doesn't blow out its column.
@@ -44,9 +44,9 @@ There is no linter or formatter configured in this repo.
 - `zoom.py` — one `Gtk.CssProvider` per window scoped via a unique CSS class (not per-widget `StyleContext.add_provider`, which is deprecated), stepping a font-size on the `TextView`. Heading/code tags carry static `Gtk.TextTag.scale` values that GTK composes on top automatically — zooming never touches the tag table.
 - `printing.py` — `Gtk.PrintOperation` pagination built from `print_model`, walking Pango layouts page-by-page. `Pango.AttrList` offsets are UTF-8 *byte* offsets, not character offsets — run-boundary byte lengths are computed explicitly, not assumed to match `len(text)`. `Pango.LayoutLine` keeps only a weak reference to its parent `Pango.Layout`, so the built `_Block` list must be kept alive in `state` between `begin-print` and `draw-page`, not just its derived page geometry.
 - `filewatch.py` — `Gio.FileMonitor` with `WATCH_MOVES` (needed because editors that save via write-temp-then-rename otherwise look like the file vanishing) and a 300ms debounce coalescing the burst of events one logical save produces.
-- `window.py` — one `MdViewWindow` per file; owns the widget tree, find-bar/zoom UI, click dispatch for links/footnotes (via `renderer.target_at_iter`), reload handling (preserves scroll position as a fraction, not an exact mark, since content may reshuffle), and the anchored-widget width sync described above.
-- `main.py` — `Adw.Application` with `HANDLES_OPEN`. `do_open` creates one window per file, including on repeat launches while already running (GApplication's default D-Bus single-process activation still produces a new window, not a reused one — this is intentional, not an oversight). App-scoped accelerators (`window.close`, `app.quit`, zoom, find, print) are bound once in `do_startup`, not per-window — binding them per-`MdViewWindow.__init__` would redundantly re-apply identical accelerator maps for every window opened.
+- `window.py` — one `LecternWindow` per file; owns the widget tree, find-bar/zoom UI, click dispatch for links/footnotes (via `renderer.target_at_iter`), reload handling (preserves scroll position as a fraction, not an exact mark, since content may reshuffle), and the anchored-widget width sync described above.
+- `main.py` — `Adw.Application` with `HANDLES_OPEN`. `do_open` creates one window per file, including on repeat launches while already running (GApplication's default D-Bus single-process activation still produces a new window, not a reused one — this is intentional, not an oversight). App-scoped accelerators (`window.close`, `app.quit`, zoom, find, print) are bound once in `do_startup`, not per-window — binding them per-`LecternWindow.__init__` would redundantly re-apply identical accelerator maps for every window opened.
 
 **Testing:** `tests/test_renderer.py` tests are genuinely headless — `Gtk.TextBuffer` manipulation only needs GTK initialized, not a realized/displayed window, so no `xvfb-run` wrapper is needed locally (CI in a display-less environment would still want one as a safety net). Tests assert tag placement on parsed-and-rendered buffers (e.g., parse `"hello **world**"`, locate `"world"`, assert it has the `strong` tag) — this is the pattern to follow for new renderer coverage rather than snapshot-testing rendered output.
 
-**App ID:** `io.github.osandum.Mdview` (matches the GitHub repo `osandum/gnome-mdview`; the Python package/import name `mdview` is independent of both and doesn't need to match).
+**App ID:** `io.github.osandum.Lectern` — permanent once published to Flathub, so don't churn it. The Python package/import name (`lectern`) and the GitHub repo name (still `osandum/gnome-mdview` at time of writing) are independent of it and don't need to match.

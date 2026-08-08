@@ -1,4 +1,4 @@
-# mdview
+# Lectern
 
 A read-only, [Papers](https://apps.gnome.org/da/Papers/)-style Markdown
 viewer for GNOME: open a `.md` file, read it, search/zoom/print it. No
@@ -17,11 +17,16 @@ editing UI.
 python3 -m venv .venv --system-site-packages
 source .venv/bin/activate
 pip install -e .
-mdview path/to/file.md
+lectern path/to/file.md
 ```
 
 `--system-site-packages` is required so the venv can see the system
 PyGObject/GTK4/Libadwaita bindings, which are not installed via pip.
+
+To get a desktop entry, copy `data/io.github.osandum.Lectern.desktop` to
+`~/.local/share/applications/`. Its `Exec=lectern %U` resolves via
+`PATH`, so the venv's `bin/` has to be on your `PATH` for launching from
+the shell overview to work.
 
 ## Tests
 
@@ -34,10 +39,10 @@ manipulation only needs GTK initialized, not a realized window.
 
 ## Status
 
-v1. See known scope cuts in the design notes: find doesn't search inside
-table cells, table column widths are a simple median-character-count
-heuristic rather than true text-measurement-based sizing, and highlighting for
-undeclared/obscure fenced-code languages is best-effort.
+v1. Known scope cuts: images aren't rendered yet, table column widths are
+a simple median-character-count heuristic rather than true
+text-measurement-based sizing, and highlighting for undeclared/obscure
+fenced-code languages is best-effort.
 
 ## License
 

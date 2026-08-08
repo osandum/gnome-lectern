@@ -1,4 +1,4 @@
-"""One MdViewWindow per opened file -- Evince/Papers-style: no sidebar, no
+"""One LecternWindow per opened file -- Evince/Papers-style: no sidebar, no
 editing surface, minimal headerbar, a top find-bar revealer and a floating
 bottom-right zoom pill (the same idiom Papers/Loupe use for zoom controls).
 """
@@ -16,7 +16,7 @@ from .filewatch import FileWatcher
 from .printing import PrintCoordinator
 
 
-class MdViewWindow(Adw.ApplicationWindow):
+class LecternWindow(Adw.ApplicationWindow):
     def __init__(self, application, gfile=None):
         super().__init__(application=application, default_width=760, default_height=900)
         self._document = None
@@ -53,7 +53,7 @@ class MdViewWindow(Adw.ApplicationWindow):
 
     def _build_headerbar(self):
         header = Adw.HeaderBar()
-        self._window_title = Adw.WindowTitle(title="mdview")
+        self._window_title = Adw.WindowTitle(title="Lectern")
         header.set_title_widget(self._window_title)
 
         self._find_toggle = Gtk.ToggleButton(icon_name="edit-find-symbolic", tooltip_text="Find")
@@ -64,7 +64,7 @@ class MdViewWindow(Adw.ApplicationWindow):
         menu.append("Print…", "win.print-doc")
         menu.append("Document Properties", "win.properties")
         menu.append("Keyboard Shortcuts", "win.show-help-overlay")
-        menu.append("About mdview", "app.about")
+        menu.append("About Lectern", "app.about")
         menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", tooltip_text="Main Menu")
         menu_button.set_menu_model(menu)
         header.pack_end(menu_button)
@@ -82,7 +82,7 @@ class MdViewWindow(Adw.ApplicationWindow):
             wrap_mode=Gtk.WrapMode.WORD_CHAR,
             left_margin=16, right_margin=16, top_margin=16, bottom_margin=16,
         )
-        self._textview.add_css_class("mdview-content")
+        self._textview.add_css_class("lectern-content")
 
         click = Gtk.GestureClick()
         click.connect("released", self._on_textview_click)
@@ -100,7 +100,7 @@ class MdViewWindow(Adw.ApplicationWindow):
         # Gtk.TextView never stretches an anchored child widget to fill
         # the line -- hexpand/halign on the widget itself are silently
         # ignored, confirmed empirically -- so table frames and hr
-        # separators (mdview's only two anchored widget kinds) would
+        # separators (Lectern's only two anchored widget kinds) would
         # otherwise sit at their own tiny natural width forever, in a sea
         # of unused space, and never react to the window being resized.
         # The adjustment's page-size is the one reliable, signal-based way
@@ -368,7 +368,7 @@ class MdViewWindow(Adw.ApplicationWindow):
         that's not a URI at all, just a relative filesystem path. This is
         the common case for documentation that cross-links to files
         sitting next to it, e.g. this app's own tests/fixtures/*.md.
-        A resolved link to another .md file opens in mdview itself,
+        A resolved link to another .md file opens in Lectern itself,
         for free, since we're the registered default handler for
         text/markdown -- no special-casing needed here.
         """

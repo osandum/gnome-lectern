@@ -7,7 +7,7 @@ for how a token type is colored on screen vs. on paper.
 
 All `pygments` imports are deliberately deferred into highlight_runs()
 (mirroring document.py's lazy markdown_it import) -- a document with no
-fenced code blocks, or a bare `mdview` launch, shouldn't pay for pygments'
+fenced code blocks, or a bare `lectern` launch, shouldn't pay for pygments'
 lexer registry at all.
 """
 from .tags import PYGMENTS_TAG_NAMES

@@ -26,7 +26,7 @@ class ZoomController(GObject.Object):
         global _next_instance_id
         _next_instance_id += 1
         self.textview = textview
-        self._css_class = f"mdview-zoom-{_next_instance_id}"
+        self._css_class = f"lectern-zoom-{_next_instance_id}"
         textview.add_css_class(self._css_class)
         self._provider = Gtk.CssProvider()
         self._display = textview.get_display() or Gdk.Display.get_default()

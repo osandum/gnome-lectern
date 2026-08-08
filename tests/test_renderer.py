@@ -9,13 +9,13 @@ from gi.repository import Gtk
 
 from markdown_it.tree import SyntaxTreeNode
 
-from mdview.document import make_parser
-from mdview.tags import create_tag_table
-from mdview.renderer import MarkdownRenderer
+from lectern.document import make_parser
+from lectern.tags import create_tag_table
+from lectern.renderer import MarkdownRenderer
 
 # One parser reused across every test in this module, both to avoid
 # rebuilding it ~13 times over and to test against the exact same
-# construction the app ships (mdview.document.make_parser), rather than a
+# construction the app ships (lectern.document.make_parser), rather than a
 # hand-copied duplicate that could silently drift from it.
 _PARSER = make_parser()
 

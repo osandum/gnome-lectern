@@ -1,12 +1,14 @@
 [Desktop Entry]
 Type=Application
-Name=mdview
+Name=Lectern
 GenericName=Markdown Viewer
 Comment=View Markdown files
-Exec=/home/osa/dev/mdview/.venv/bin/mdview %U
+Exec=lectern %U
 Icon=text-x-generic-symbolic
 Terminal=false
 NoDisplay=false
 StartupNotify=true
-MimeType=text/markdown;
+StartupWMClass=io.github.osandum.Lectern
+Keywords=Markdown;md;CommonMark;GFM;viewer;reader;
+MimeType=text/markdown;text/x-markdown;
 Categories=GNOME;GTK;Office;Viewer;

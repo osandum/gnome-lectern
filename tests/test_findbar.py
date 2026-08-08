@@ -9,10 +9,10 @@ from gi.repository import Gtk
 
 from markdown_it.tree import SyntaxTreeNode
 
-from mdview.document import make_parser
-from mdview.tags import create_tag_table
-from mdview.renderer import MarkdownRenderer
-from mdview.findbar import FindController, MATCH_BG, CURRENT_BG
+from lectern.document import make_parser
+from lectern.tags import create_tag_table
+from lectern.renderer import MarkdownRenderer
+from lectern.findbar import FindController, MATCH_BG, CURRENT_BG
 
 _PARSER = make_parser()
 

@@ -1,5 +1,5 @@
 """CLI entry point. Imports of markdown_it/pygments deliberately stay
-inside document.py/highlighting.py, not here -- a bare `mdview` launch or
+inside document.py/highlighting.py, not here -- a bare `lectern` launch or
 an argument error shouldn't pay for parsing/highlighting machinery it
 never uses.
 """
@@ -11,12 +11,12 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, Gio
 
 from . import __version__
-from .window import MdViewWindow
+from .window import LecternWindow
 
-APPLICATION_ID = "io.github.osandum.Mdview"
+APPLICATION_ID = "io.github.osandum.Lectern"
 
 
-class MdViewApplication(Adw.Application):
+class LecternApplication(Adw.Application):
     def __init__(self):
         super().__init__(application_id=APPLICATION_ID, flags=Gio.ApplicationFlags.HANDLES_OPEN)
         about_action = Gio.SimpleAction.new("about", None)
@@ -34,7 +34,7 @@ class MdViewApplication(Adw.Application):
         Adw.Application.do_startup(self)
         # Accels are application-scoped state (win.* actions are resolved
         # against whichever window has focus at trigger time) -- set once
-        # per process here, not once per window in MdViewWindow.__init__.
+        # per process here, not once per window in LecternWindow.__init__.
         self.set_accels_for_action("win.find", ["<primary>f"])
         self.set_accels_for_action("win.zoom-in", ["<primary>plus", "<primary>equal", "<primary>KP_Add"])
         self.set_accels_for_action("win.zoom-out", ["<primary>minus", "<primary>KP_Subtract"])
@@ -52,19 +52,19 @@ class MdViewApplication(Adw.Application):
         # activation -- no window-reuse logic, by design (Papers/Evince
         # model: a second file always gets a second window).
         for gfile in files:
-            win = MdViewWindow(application=self, gfile=gfile)
+            win = LecternWindow(application=self, gfile=gfile)
             win.present()
 
     def do_activate(self):
-        win = MdViewWindow(application=self)
+        win = LecternWindow(application=self)
         win.present()
 
     def _on_about(self, action, param):
         about = Adw.AboutDialog(
-            application_name="mdview",
+            application_name="Lectern",
             application_icon="text-x-generic-symbolic",
             version=__version__,
-            developer_name="mdview contributors",
+            developer_name="Lectern contributors",
             license_type=Gtk.License.GPL_2_0,
             comments="A read-only, Papers-style Markdown viewer.",
             website="https://github.com/osandum/gnome-mdview",
@@ -73,7 +73,7 @@ class MdViewApplication(Adw.Application):
 
 
 def main():
-    app = MdViewApplication()
+    app = LecternApplication()
     try:
         return app.run(sys.argv)
     except KeyboardInterrupt:

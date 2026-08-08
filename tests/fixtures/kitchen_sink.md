@@ -1,6 +1,6 @@
-# mdview kitchen sink
+# Lectern kitchen sink
 
-This fixture exercises every feature mdview v1 is expected to render.
+This fixture exercises every feature Lectern v1 is expected to render.
 
 ## Headings
 
@@ -57,7 +57,7 @@ class Example:
         self.value = value
 ```
 
-A fenced block in a language mdview has never heard of, to exercise the
+A fenced block in a language Lectern has never heard of, to exercise the
 `guess_lexer` fallback path:
 
 ```blorpiscript

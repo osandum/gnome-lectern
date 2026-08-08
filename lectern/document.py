@@ -1,6 +1,6 @@
 """File I/O + Markdown parsing. Imports of markdown_it/mdit_py_plugins are
-deliberately kept inside this module (not at mdview.main top level) so a
-bare `mdview` launch with no file to parse doesn't pay for them.
+deliberately kept inside this module (not at lectern.main top level) so a
+bare `lectern` launch with no file to parse doesn't pay for them.
 """
 from gi.repository import Gio, GLib
 

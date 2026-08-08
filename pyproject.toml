@@ -1,5 +1,5 @@
 [project]
-name = "mdview"
+name = "lectern"
 version = "0.1.0"
 description = "A read-only, Papers-style GTK4/Libadwaita Markdown viewer"
 license = { file = "LICENSE" }
@@ -15,11 +15,11 @@ dependencies = [
 test = ["pytest>=8.0"]
 
 [project.scripts]
-mdview = "mdview.main:main"
+lectern = "lectern.main:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["mdview*"]
+include = ["lectern*"]
