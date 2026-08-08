@@ -30,10 +30,23 @@ lectern path/to/file.md
 `--system-site-packages` is required so the venv can see the system
 PyGObject/GTK4/Libadwaita bindings, which are not installed via pip.
 
-To get a desktop entry, copy `data/io.github.osandum.Lectern.desktop` to
-`~/.local/share/applications/`. Its `Exec=lectern %U` resolves via
-`PATH`, so the venv's `bin/` has to be on your `PATH` for launching from
-the shell overview to work.
+To get a desktop entry with its icon:
+
+```sh
+cp data/io.github.osandum.Lectern.desktop ~/.local/share/applications/
+cp -r data/icons/hicolor ~/.local/share/icons/
+gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor
+update-desktop-database ~/.local/share/applications
+```
+
+The desktop entry's `Exec=lectern %U` resolves via `PATH`, so the venv's
+`bin/` has to be on your `PATH` — symlinking `.venv/bin/lectern` into
+`~/.local/bin/` is the easy way. Copying the entry without the icons
+leaves it showing a blank tile, since `Icon=` names a themed icon rather
+than a file path.
+
+Nothing under `data/` is installed by `pip install -e .` — `pyproject.toml`
+ships only the Python package. Packaging that properly is still open.
 
 ## Tests
 

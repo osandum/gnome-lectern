@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for coding agents working in this repository.
 
 ## What this is
 
@@ -51,3 +51,16 @@ There is no linter or formatter configured in this repo.
 **Testing:** `tests/test_renderer.py` tests are genuinely headless — `Gtk.TextBuffer` manipulation only needs GTK initialized, not a realized/displayed window, so no `xvfb-run` wrapper is needed locally (CI in a display-less environment would still want one as a safety net). Tests assert tag placement on parsed-and-rendered buffers (e.g., parse `"hello **world**"`, locate `"world"`, assert it has the `strong` tag) — this is the pattern to follow for new renderer coverage rather than snapshot-testing rendered output.
 
 **App ID:** `io.github.osandum.Lectern` — permanent once published to Flathub, so don't churn it. The Python package/import name (`lectern`) and the GitHub repo name (`osandum/gnome-lectern`) are independent of it and don't need to match.
+
+## Data files and packaging
+
+`data/` holds the desktop entry and the icons (`icons/hicolor/scalable/apps/` for the colour icon, `icons/hicolor/symbolic/apps/` for the monochrome one, both named after the app ID).
+
+**None of it is installed by `pip install -e .`** — `pyproject.toml` ships only the Python package, so the desktop entry and icons reach a machine only if copied by hand (see the README). This is the main gap left before Lectern is installable by anyone else, along with the missing AppStream metainfo. `Exec=lectern %U` deliberately resolves via `PATH` rather than hardcoding a path into somebody's venv, which an earlier version did.
+
+**Icon constraints, learned by testing rather than assumed** — worth not re-litigating:
+- The page is **portrait**. A landscape page above a stand reads as a *laptop* at 32px; four drafts failed this way before the shape was changed.
+- The stand is **one flaring mass**, not a column and a foot. Thin slabs vanish at 32px and leave the page looking like a sign on a post.
+- In the symbolic variant the page must be an **outline**. Filled, it merges into the stand and the silhouette becomes one blob.
+- Always check a candidate at 32/48/64, not just at 128 — every one of the above only shows up small. Render through librsvg (what GTK uses), not ImageMagick's SVG delegate.
+- `--` is illegal inside an XML comment, so the `--` used as a dash elsewhere in this codebase can't be used in the SVGs.
