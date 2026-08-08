@@ -49,4 +49,4 @@ There is no linter or formatter configured in this repo.
 
 **Testing:** `tests/test_renderer.py` tests are genuinely headless — `Gtk.TextBuffer` manipulation only needs GTK initialized, not a realized/displayed window, so no `xvfb-run` wrapper is needed locally (CI in a display-less environment would still want one as a safety net). Tests assert tag placement on parsed-and-rendered buffers (e.g., parse `"hello **world**"`, locate `"world"`, assert it has the `strong` tag) — this is the pattern to follow for new renderer coverage rather than snapshot-testing rendered output.
 
-**App ID:** `io.github.osandum.Lectern` — permanent once published to Flathub, so don't churn it. The Python package/import name (`lectern`) and the GitHub repo name (still `osandum/gnome-mdview` at time of writing) are independent of it and don't need to match.
+**App ID:** `io.github.osandum.Lectern` — permanent once published to Flathub, so don't churn it. The Python package/import name (`lectern`) and the GitHub repo name (`osandum/gnome-lectern`) are independent of it and don't need to match.

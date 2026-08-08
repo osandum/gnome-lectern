@@ -67,7 +67,7 @@ class LecternApplication(Adw.Application):
             developer_name="Lectern contributors",
             license_type=Gtk.License.GPL_2_0,
             comments="A read-only, Papers-style Markdown viewer.",
-            website="https://github.com/osandum/gnome-mdview",
+            website="https://github.com/osandum/gnome-lectern",
         )
         about.present(self.get_active_window())
 
