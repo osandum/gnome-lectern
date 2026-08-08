@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="page" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e8e6e3"/>
+    </linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#cdab8f"/><stop offset="1" stop-color="#b5835a"/>
+    </linearGradient>
+    <linearGradient id="woodDark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a3714c"/><stop offset="1" stop-color="#825b3a"/>
+    </linearGradient>
+  </defs>
+  <!-- Geometry notes, since they were measured rather than eyeballed:
+       the page is PORTRAIT on purpose. A landscape page plus a stand
+       reads as a laptop at 32px; portrait reads as a document, which is
+       the whole point. The translate centres the drawn content in the
+       128 grid (bbox was 26px from the left, 3px from the top) and
+       leaves a 6px margin all round. -->
+  <g transform="translate(-4 3)">
+
+  <!-- The stand is one flaring mass, not a stick: a thin column vanishes
+       at 32px and leaves the page looking like a sign on a post. -->
+  <path d="M46 80 L82 80 L98 112 L30 112 Z" fill="url(#woodDark)"/>
+  <rect x="26" y="106" width="76" height="13" rx="6" fill="url(#wood)"/>
+  <g transform="rotate(-8 64 44)">
+    <rect x="36" y="6" width="56" height="66" rx="5" fill="url(#page)"/>
+    <rect x="45" y="18" width="30" height="8" rx="4" fill="#3584e4"/>
+    <rect x="45" y="33" width="38" height="6" rx="3" fill="#c0bfbc"/>
+    <rect x="45" y="44" width="32" height="6" rx="3" fill="#c0bfbc"/>
+    <rect x="45" y="55" width="38" height="6" rx="3" fill="#c0bfbc"/>
+    <rect x="22" y="68" width="84" height="15" rx="5" fill="url(#wood)"/>
+  </g>
+  </g>
+</svg>
