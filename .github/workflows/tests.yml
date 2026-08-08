@@ -92,5 +92,6 @@ jobs:
             print('GTK', Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version()); \
             print('Adw', Adw.get_major_version(), Adw.get_minor_version())"
 
+      # xvfb here too; see the Ubuntu job for why.
       - name: Run tests
-        run: .venv/bin/python -m pytest -q
+        run: xvfb-run -a .venv/bin/python -m pytest -q
