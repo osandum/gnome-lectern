@@ -44,8 +44,18 @@ jobs:
           assert m["command"], "manifest has no command"
           for mod in m["modules"]:
               for src in mod.get("sources", []):
-                  if src.get("type") == "file":
+                  t = src.get("type")
+                  if t == "file":
                       assert src.get("sha256"), f'unpinned source: {src.get("url")}'
+                  elif t == "git":
+                      # Flathub requires immutable sources: a tag can be
+                      # moved, so the commit has to be pinned as well.
+                      assert src.get("commit"), f'git source without a commit: {src.get("url")}'
+                  elif t == "dir":
+                      raise AssertionError(
+                          "manifest has a 'dir' source; Flathub needs an immutable "
+                          "source. Fine while developing, not on main."
+                      )
           print(f"{path}: ok, id={m['id']}, runtime {m['runtime']} {m['runtime-version']}")
           PY
 

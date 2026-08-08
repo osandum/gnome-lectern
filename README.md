@@ -61,10 +61,10 @@ flatpak-builder --user --install --force-clean build \
 flatpak run io.github.osandum.Lectern
 ```
 
-The manifest takes its sources from the local checkout, so it builds
-straight from a clone. Submitting to Flathub needs that swapped for a
-git source pinned to a tag and commit — there's a comment in the manifest
-marking the spot.
+The manifest is pinned to a released tag and its commit, so this builds
+the *release*, not your working tree — it fetches from GitHub rather than
+reading the checkout. To build what you have locally, swap the `type: git`
+source for the `type: dir` block noted in the manifest just above it.
 
 ## Tests
 

@@ -89,12 +89,18 @@ modules:
       - install -Dm644 data/icons/hicolor/symbolic/apps/io.github.osandum.Lectern-symbolic.svg
         ${FLATPAK_DEST}/share/icons/hicolor/symbolic/apps/io.github.osandum.Lectern-symbolic.svg
     sources:
-      # Local checkout, so `flatpak-builder` works straight from a clone.
-      # FLATHUB SUBMISSION NEEDS THIS CHANGED: Flathub requires immutable
-      # sources, so replace with a git source pinned to a tag and commit:
-      #   - type: git
-      #     url: https://github.com/osandum/gnome-lectern.git
-      #     tag: v0.1.0
-      #     commit: <the tag's commit sha>
-      - type: dir
-        path: ..
+      # Pinned to a tag AND its commit, which is what Flathub requires: a
+      # tag alone can be moved, the commit cannot. Both are given so the
+      # build is reproducible and a retagging is caught rather than
+      # silently followed.
+      #
+      # Bumping a release means: tag, then update BOTH lines below.
+      #
+      # To build the working tree instead of the release -- which is what
+      # you want while developing -- swap this block for:
+      #   - type: dir
+      #     path: ..
+      - type: git
+        url: https://github.com/osandum/gnome-lectern.git
+        tag: v0.1.0
+        commit: cadfdecd22058916c5ffcfd847d54aa754887931
