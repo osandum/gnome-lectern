@@ -2,10 +2,11 @@
 
 Every block-level emission also appends a PrintItem to `self.print_model`,
 built in the same pass -- this is the fix for the fact that
-Gtk.TextChildAnchor-embedded tables (and separators) are invisible to both
-buffer-native find and any attempt to reconstruct print content by
-re-walking the buffer afterward. Printing (see printing.py) works off
-print_model exclusively, never off the live buffer.
+Gtk.TextChildAnchor-embedded tables (and separators) are invisible to any
+attempt to reconstruct print content by re-walking the buffer afterward.
+Printing (see printing.py) works off print_model exclusively, never off
+the live buffer. For the same reason, `self.tables` records each table's
+anchor and cell labels so findbar.py can search that text too.
 """
 import gi
 gi.require_version("Gtk", "4.0")
@@ -74,6 +75,10 @@ class MarkdownRenderer:
         # links do. The caller (window.py) connects "activate-link" on
         # each after render() returns.
         self.table_link_labels = []
+        # (anchor, tables.TableCell grid shaped [row][col]) per table --
+        # findbar.py uses this to search and highlight table-cell text,
+        # which never enters the TextBuffer.
+        self.tables = []
         self._footnote_ref_marks = {}   # label -> mark name
         self._footnote_def_marks = {}   # label -> mark name
         self._pending_anchors = []      # (anchor, widget) drained by caller
@@ -248,9 +253,10 @@ class MarkdownRenderer:
         self.print_model.append(PrintItem("hr", block_tags=list(ctx.block_tags)))
 
     def _emit_table(self, node, buffer, it, ctx):
-        widget, rows, link_labels = tables.build_table_widget(node, self._link_color)
+        widget, rows, link_labels, cells = tables.build_table_widget(node, self._link_color)
         self.table_link_labels.extend(link_labels)
         anchor = buffer.create_child_anchor(it)
+        self.tables.append((anchor, cells))
         self._pending_anchors.append((anchor, widget))
         buffer.insert(it, "\n")
         self.print_model.append(PrintItem("table", rows=rows, block_tags=list(ctx.block_tags)))

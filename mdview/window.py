@@ -471,7 +471,7 @@ class MdViewWindow(Adw.ApplicationWindow):
         self._sync_fill_width_widgets()
         for label in self._renderer.table_link_labels:
             label.connect("activate-link", self._on_table_link_activated)
-        self._find = FindController(self._textview)
+        self._find = FindController(self._textview, self._renderer.tables)
         self._sync_find_label()
 
     def _on_reload_needed(self, watcher):

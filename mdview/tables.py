@@ -92,15 +92,42 @@ def extract_rows(table_node):
     return [[_cell_text(cell) for cell in cells] for cells in _iter_rows(table_node)]
 
 
-def _cell_markup(cell_node, link_color):
+def _cell_markup(cell_node, link_color, highlights=()):
     """Render a cell's inline content as Pango markup for an on-screen
     Gtk.Label -- preserves links as clickable <a href> spans (so a cell
     like `[`../app/foo/`](../app/foo/)` is navigable, not just readable)
     plus the same handful of inline styles renderer.py supports for body
     text. Only covers what plausibly turns up in a table cell, not the
     full inline grammar the main buffer renderer handles.
+
+    `highlights` is find's `[(start, end, color)]` over the cell's plain
+    text, baked straight into the markup -- see TableCell.highlight for
+    why they can't just be Pango attributes layered on afterward.
     """
     parts = []
+    emitted = 0  # plain-text characters emitted so far, to index highlights by
+
+    def emit(text):
+        """Append `text`, escaped, wrapping any highlighted slice of it in
+        a background span. Slicing per emitted run (rather than once over
+        the finished markup) is what keeps the result well-formed: a match
+        straddling an inline tag boundary just yields one span each side
+        of it instead of a span crossing the tag.
+        """
+        nonlocal emitted
+        start, end = emitted, emitted + len(text)
+        emitted = end
+        cursor = start
+        for hl_start, hl_end, color in highlights:
+            lo, hi = max(hl_start, cursor), min(hl_end, end)
+            if lo >= hi:
+                continue
+            parts.append(GLib.markup_escape_text(text[cursor - start:lo - start]))
+            parts.append(f'<span background="{color}">')
+            parts.append(GLib.markup_escape_text(text[lo - start:hi - start]))
+            parts.append("</span>")
+            cursor = hi
+        parts.append(GLib.markup_escape_text(text[cursor - start:]))
 
     def open_link(href):
         if href:
@@ -118,14 +145,16 @@ def _cell_markup(cell_node, link_color):
         t = node.type
         if t == "text":
             open_link(href)
-            parts.append(GLib.markup_escape_text(node.content))
+            emit(node.content)
             close_link(href)
         elif t == "code_inline":
             open_link(href)
-            parts.append(f"<tt>{GLib.markup_escape_text(node.content)}</tt>")
+            parts.append("<tt>")
+            emit(node.content)
+            parts.append("</tt>")
             close_link(href)
         elif t == "softbreak":
-            parts.append(" ")
+            emit(" ")
         elif t == "strong":
             parts.append("<b>")
             for child in node.children:
@@ -156,13 +185,48 @@ def _cell_markup(cell_node, link_color):
     return "".join(parts)
 
 
+class TableCell:
+    """One rendered cell, kept re-renderable so find can highlight it.
+
+    Highlights are re-rendered into the markup rather than layered on as
+    Pango attributes, because Gtk.Label.set_attributes *merges* into the
+    label's cached PangoLayout instead of replacing its attribute list:
+    shrinking the highlight set (backspacing in the find bar, or clearing
+    it) leaves the dropped ranges painted, and set_attributes(None)
+    doesn't remove them either. Re-setting the markup makes GTK rebuild
+    the layout outright, which is the only reliable way back to a clean
+    label.
+    """
+    __slots__ = ("label", "_node", "_link_color", "_heading")
+
+    def __init__(self, label, node, link_color, heading):
+        self.label = label
+        self._node = node
+        self._link_color = link_color
+        self._heading = heading
+
+    @property
+    def text(self):
+        """The cell's plain text -- what find searches, and what the
+        offsets passed to highlight() index into."""
+        return self.label.get_text()
+
+    def highlight(self, ranges):
+        """`ranges` is [(start, end, color)] over `text`, in order and
+        non-overlapping. Pass an empty list to go back to no highlight."""
+        markup = _cell_markup(self._node, self._link_color, ranges)
+        self.label.set_markup(f"<b>{markup}</b>" if self._heading else markup)
+
+
 def build_table_widget(table_node, link_color):
-    """Return (widget_to_embed, rows, link_labels) -- rows is reused
-    verbatim for print; link_labels are the Gtk.Labels whose markup
+    """Return (widget_to_embed, rows, link_labels, cells) -- rows is
+    reused verbatim for print; link_labels are the Gtk.Labels whose markup
     contains a clickable link, for the caller to connect "activate-link"
     on (see window.py) -- table cell clicks don't route through the
     buffer's tag-based dispatch_targets mechanism at all, since this
-    content lives in embedded widgets, not the TextBuffer.
+    content lives in embedded widgets, not the TextBuffer. cells is a
+    TableCell per cell, in the same [row][col] shape as rows, so
+    findbar.py can search and highlight this widget-based text too.
     """
     cell_rows = list(_iter_rows(table_node))
     rows = [[_cell_text(cell) for cell in cells] for cells in cell_rows]
@@ -174,9 +238,11 @@ def build_table_widget(table_node, link_color):
     # matches how GitHub/pandoc render GFM tables in practice.
     grid = Gtk.Grid(column_spacing=16, row_spacing=0)
     link_labels = []
+    cell_grid = []
     grid_row = 0
     for row_index, cells in enumerate(cell_rows):
         is_head = row_index == 0
+        cell_row = []
         for col_index, cell_node in enumerate(cells):
             label = Gtk.Label(
                 xalign=0.0, wrap=True, hexpand=True,
@@ -193,7 +259,9 @@ def build_table_widget(table_node, link_color):
             label.set_markup(f"<b>{markup}</b>" if is_head else markup)
             if "<a href" in markup:
                 link_labels.append(label)
+            cell_row.append(TableCell(label, cell_node, link_color, is_head))
             grid.attach(label, col_index, grid_row, 1, 1)
+        cell_grid.append(cell_row)
         grid_row += 1
         if row_index < len(cell_rows) - 1:
             rule = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
@@ -204,4 +272,4 @@ def build_table_widget(table_node, link_color):
     frame.set_child(grid)
     frame.set_margin_top(6)
     frame.set_margin_bottom(6)
-    return frame, rows, link_labels
+    return frame, rows, link_labels, cell_grid
