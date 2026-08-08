@@ -43,11 +43,19 @@ modules:
   # Pinned wheels, because a Flatpak build has no network. All four are
   # pure Python (py3-none-any), so nothing is compiled here. To refresh:
   # bump the version, URL and sha256 together from PyPI.
+  #
+  # --ignore-installed is load-bearing, not belt-and-braces. The build
+  # runs against org.gnome.Sdk and the result runs against
+  # org.gnome.Platform, and the Sdk is a superset: it ships Pygments,
+  # the Platform does not. Without this flag pip reports "Requirement
+  # already satisfied: pygments" at build time and installs nothing, and
+  # the app then crashes with ModuleNotFoundError the first time it
+  # renders a fenced code block. Verified the hard way.
   - name: python3-deps
     buildsystem: simple
     build-commands:
       - >-
-        pip3 install --no-index --no-build-isolation
+        pip3 install --no-index --no-build-isolation --ignore-installed
         --find-links="file://${PWD}" --prefix=${FLATPAK_DEST}
         mdurl markdown-it-py mdit-py-plugins pygments
     sources:
