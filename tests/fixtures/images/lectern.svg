@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120" width="160" height="120">
+  <rect width="160" height="120" rx="8" fill="#f6f5f4"/>
+  <!-- sloped reading surface -->
+  <path d="M32 46 L128 30 L136 52 L40 68 Z" fill="#3584e4"/>
+  <!-- a page resting on it, semi-transparent so the render exercises alpha -->
+  <path d="M48 46 L116 35 L120 47 L52 58 Z" fill="#ffffff" opacity="0.85"/>
+  <!-- post and base -->
+  <rect x="76" y="66" width="10" height="34" fill="#813d9c"/>
+  <rect x="56" y="98" width="50" height="8" rx="4" fill="#813d9c"/>
+</svg>

@@ -188,6 +188,17 @@ line 100 of a deliberately long code block
 A regular [link to example.com](https://example.com) and an explicit
 autolink <https://example.com/autolink>.
 
+## Images
+
+A local image, resolved relative to this file's own directory:
+
+![a lectern with a page resting on it](images/lectern.svg)
+
+A small image sits ![a green dot](images/dot.svg) inline in the text,
+rather than alone in its own paragraph. Markdown has no way to ask for a
+size, so every image is shown at its own — which is why this one is an
+icon rather than the picture above.
+
 ## Footnotes
 
 Here is a claim that needs a citation.[^1] Here is a second one.[^2]
