@@ -44,22 +44,22 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/osandum/gnome-lectern/main/data/screenshots/01-reading.png</image>
+      <image>https://raw.githubusercontent.com/osandum/lectern/main/data/screenshots/01-reading.png</image>
       <caption>A document with a table, task list and highlighted code</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/osandum/gnome-lectern/main/data/screenshots/02-code-and-tables.png</image>
+      <image>https://raw.githubusercontent.com/osandum/lectern/main/data/screenshots/02-code-and-tables.png</image>
       <caption>Fenced code blocks are syntax highlighted</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/osandum/gnome-lectern/main/data/screenshots/03-find.png</image>
+      <image>https://raw.githubusercontent.com/osandum/lectern/main/data/screenshots/03-find.png</image>
       <caption>Find matches text inside table cells as well as body text</caption>
     </screenshot>
   </screenshots>
 
-  <url type="homepage">https://github.com/osandum/gnome-lectern</url>
-  <url type="bugtracker">https://github.com/osandum/gnome-lectern/issues</url>
-  <url type="vcs-browser">https://github.com/osandum/gnome-lectern</url>
+  <url type="homepage">https://github.com/osandum/lectern</url>
+  <url type="bugtracker">https://github.com/osandum/lectern/issues</url>
+  <url type="vcs-browser">https://github.com/osandum/lectern</url>
 
   <content_rating type="oars-1.1"/>
 
@@ -79,6 +79,15 @@
   </requires>
 
   <releases>
+    <release version="0.1.1" date="2026-08-08">
+      <description>
+        <p>
+          Corrects the project URLs after the repository was renamed, so
+          the screenshots and links point at their permanent locations
+          rather than relying on a redirect.
+        </p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-08-08">
       <description>
         <p>First release.</p>

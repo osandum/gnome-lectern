@@ -13,12 +13,18 @@ finish-args:
   - --socket=fallback-x11
   - --device=dri
 
-  # A read-only view of the filesystem. The document portal grants access to
-  # the single file the user opened, which is not enough for a Markdown
-  # viewer: images and links are written relative to the document, so
-  # `![](images/x.png)` and a link to a sibling .md file both need the
-  # document's directory. Read-only, because nothing here ever writes.
-  - --filesystem=host:ro
+  # A read-only view of the home directory. The document portal grants
+  # access to the single file the user opened, which is not enough for a
+  # Markdown viewer: images and links are written relative to the
+  # document, so `![](images/x.png)` and a link to a sibling .md file both
+  # need the document's *directory*, which no portal can hand over.
+  #
+  # home rather than host, deliberately: it covers essentially all real
+  # documents while being far narrower than the whole filesystem. The
+  # tradeoff is that a document opened from outside home (/usr/share/doc,
+  # a mounted volume) still renders, but its local images and sibling
+  # links do not resolve. Read-only, because nothing here ever writes.
+  - --filesystem=home:ro
 
   # Remote images. Never fetched on open -- the reader has to press Load on
   # a banner first -- but the capability has to exist for that button to
@@ -32,7 +38,7 @@ finish-args:
   #                   unnecessary. UNVERIFIED in an actual sandbox; if
   #                   printing turns out not to work, this is the first
   #                   thing to add.
-  #   --filesystem=home:rw or host:rw   nothing is ever written.
+  #   --filesystem=home:rw   nothing is ever written.
 
 cleanup:
   - /include
@@ -101,6 +107,6 @@ modules:
       #   - type: dir
       #     path: ..
       - type: git
-        url: https://github.com/osandum/gnome-lectern.git
+        url: https://github.com/osandum/lectern.git
         tag: v0.1.0
         commit: cadfdecd22058916c5ffcfd847d54aa754887931

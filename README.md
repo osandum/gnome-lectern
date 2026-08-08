@@ -1,6 +1,6 @@
 # Lectern
 
-[![Tests](https://github.com/osandum/gnome-lectern/actions/workflows/tests.yml/badge.svg)](https://github.com/osandum/gnome-lectern/actions/workflows/tests.yml)
+[![Tests](https://github.com/osandum/lectern/actions/workflows/tests.yml/badge.svg)](https://github.com/osandum/lectern/actions/workflows/tests.yml)
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/License-GPL--2.0--or--later-blue.svg)](LICENSE)
 
 A read-only, [Papers](https://apps.gnome.org/da/Papers/)-style Markdown
