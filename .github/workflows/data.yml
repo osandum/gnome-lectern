@@ -39,7 +39,9 @@ jobs:
         run: |
           shopt -s globstar nullglob
           for f in data/**/*.svg tests/fixtures/**/*.svg; do
-            rsvg-convert -w 128 -h 128 "$f" -o /dev/null
+            # A real file, not /dev/null: rsvg-convert rejects a
+            # non-regular output target outright.
+            rsvg-convert -w 128 -h 128 "$f" -o "$(mktemp --suffix=.png)"
             echo "renders: $f"
           done
 

@@ -57,9 +57,13 @@ ships only the Python package. Packaging that properly is still open.
 pytest tests/
 ```
 
-The tests are headless — `Gtk.TextBuffer` manipulation and widget
-construction only need GTK initialized, not a realized window. Verified
-with `DISPLAY` and `WAYLAND_DISPLAY` both unset, so CI needs no `xvfb`.
+The tests never show a window, but they do need a display: constructing a
+widget with no display at all segfaults. On a desktop they just run;
+anywhere else, wrap them — `xvfb-run -a pytest`, which is what CI does.
+
+Beware of concluding otherwise from unsetting `DISPLAY` and
+`WAYLAND_DISPLAY`: GDK then falls back to the default `wayland-0` socket
+in `XDG_RUNTIME_DIR` and connects anyway.
 
 ## Status
 
