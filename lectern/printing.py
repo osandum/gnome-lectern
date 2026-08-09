@@ -9,6 +9,8 @@ this bit us once already while building this file, so run-boundary byte
 lengths are computed explicitly throughout rather than assumed to match
 `len(text)`.
 """
+import math
+
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
@@ -57,6 +59,20 @@ def _foreground_attr(rgba):
 
 def _rgba_rgb(rgba):
     return rgba.red, rgba.green, rgba.blue
+
+
+def _rounded_rect(cr, x, y, width, height, radius):
+    """Cairo path for the code panel. Deliberately a second, tiny copy of
+    decorated_textview.py's: importing that module would pull Adw and the
+    whole on-screen view into the print path for eight lines of geometry."""
+    radius = max(0.0, min(radius, width / 2.0, height / 2.0))
+    x2, y2 = x + width, y + height
+    cr.new_sub_path()
+    cr.arc(x2 - radius, y + radius, radius, -math.pi / 2, 0.0)
+    cr.arc(x2 - radius, y2 - radius, radius, 0.0, math.pi / 2)
+    cr.arc(x + radius, y2 - radius, radius, math.pi / 2, math.pi)
+    cr.arc(x + radius, y + radius, radius, math.pi, 3 * math.pi / 2)
+    cr.close_path()
 
 
 def _left_margin_pt(block_tags):
@@ -175,25 +191,21 @@ class _Block:
         self.pixbuf = None
         self.draw_size = None
         self.height = 0.0
-        self.atomic = False
+        # Chrome drawn outside the text box, mirroring what
+        # decorated_textview.py paints on screen: `panel` is the
+        # fenced-code background (a dict of geometry, or None), `rule` the
+        # RGB of an h1/h2 bottom rule (or None).
         self.panel = None
-        self.heading_rule = False
-        self.heading_rule_color = None
+        self.rule = None
 
     @classmethod
-    def text(cls, x, layout, *, atomic=False, panel=None, heading_rule=False, heading_rule_color=None):
+    def text(cls, x, layout, *, panel=None, rule=None):
         block = cls("layout", x)
         block.layout = layout
         block.lines = _line_geometry(layout)
-        text_height = (block.lines[-1][1] + block.lines[-1][2]) if block.lines else 0.0
-        panel_top = panel["pad_top"] if panel else 0.0
-        panel_bottom = panel["pad_bottom"] if panel else 0.0
-        rule_extra = (HEADING_RULE_PAD_PT + HEADING_RULE_WIDTH_PT) if heading_rule else 0.0
-        block.height = text_height + panel_top + panel_bottom + rule_extra
-        block.atomic = atomic
+        block.height = (block.lines[-1][1] + block.lines[-1][2]) if block.lines else 0.0
         block.panel = panel
-        block.heading_rule = heading_rule
-        block.heading_rule_color = heading_rule_color
+        block.rule = rule
         return block
 
     @classmethod
@@ -277,29 +289,24 @@ def _build_blocks(context, style_table, print_model, page_width, page_height, da
             x = _left_margin_pt(item.block_tags)
             layout = _build_text_layout(context, style_table, item, page_width - x)
             run_tags = {tag for _text, tags in item.runs for tag in tags}
-            has_rule = "heading1" in run_tags or "heading2" in run_tags
-            blocks.append(
-                _Block.text(
-                    x,
-                    layout,
-                    atomic=has_rule,
-                    heading_rule=has_rule,
-                    heading_rule_color=heading_rule_rgb,
-                )
-            )
+            rule = heading_rule_rgb if run_tags & {"heading1", "heading2"} else None
+            blocks.append(_Block.text(x, layout, rule=rule))
         elif item.kind == "code-block":
+            # Same shape as the on-screen panel: it spans the content
+            # column edge to edge, with the code text inset by the pad on
+            # every side.
             x = _left_margin_pt(item.block_tags)
-            layout = _build_text_layout(context, style_table, item, page_width - x - 2 * CODE_BLOCK_PAD_PT)
+            layout = _build_text_layout(
+                context, style_table, item, page_width - x - 2 * CODE_BLOCK_PAD_PT
+            )
             panel = {
                 "x": x,
-                "pad_top": CODE_BLOCK_PAD_PT,
-                "pad_bottom": CODE_BLOCK_PAD_PT,
-                "pad_left": CODE_BLOCK_PAD_PT,
-                "pad_right": CODE_BLOCK_PAD_PT,
+                "width": page_width - x,
+                "pad": CODE_BLOCK_PAD_PT,
                 "radius": CODE_BLOCK_RADIUS_PT,
                 "fill_rgb": code_bg_rgb or (0.96, 0.96, 0.96),
             }
-            blocks.append(_Block.text(x + CODE_BLOCK_PAD_PT, layout, atomic=True, panel=panel))
+            blocks.append(_Block.text(x + CODE_BLOCK_PAD_PT, layout, panel=panel))
         elif item.kind == "hr":
             blocks.append(_Block.hr())
         elif item.kind == "table":
@@ -377,29 +384,20 @@ def _paginate(blocks, page_height):
                 if i < len(row_layouts):
                     new_page()
         else:  # "layout": paragraph or code-block
-            if block.atomic:
-                if y + gap + block.height > page_height and current:
-                    new_page()
-                    gap = 0.0
-                current.append({
-                    "type": "layout-block",
-                    "x": block.x,
-                    "y": y + gap,
-                    "layout": block.layout,
-                    "panel": block.panel,
-                    "heading_rule": block.heading_rule,
-                    "heading_rule_color": block.heading_rule_color,
-                })
-                y += gap + block.height
-                continue
             if current and _out_of_room(y, gap, page_height):
                 new_page()
                 gap = 0.0
             y += gap
             lines = block.lines
+            # Padding for the code panel, and room for a heading's rule.
+            # Both are per *page fragment*: a fence split across a page
+            # break gets a self-contained panel on each side of it.
+            pad = block.panel["pad"] if block.panel else 0.0
+            rule_space = (HEADING_RULE_PAD_PT + HEADING_RULE_WIDTH_PT) if block.rule else 0.0
             li = 0
             while li < len(lines):
-                remaining = page_height - y
+                y += pad
+                remaining = page_height - y - pad - rule_space
                 chunk_top = lines[li][1]
                 chunk = []
                 while li < len(lines):
@@ -415,16 +413,29 @@ def _paginate(blocks, page_height):
                     li += 1
                 chunk_height = (chunk[-1][1] + chunk[-1][2]) - chunk[0][1]
                 current.append({
-                    "type": "layout", "x": block.x, "y": y,
+                    "type": "layout", "x": block.x,
+                    # `y` is where the chunk's *top* goes, but
+                    # show_layout_line draws from the baseline, so the
+                    # entry is anchored on the first line's baseline --
+                    # one ascent further down. Chrome (panel, rule) needs
+                    # the top and height instead, so both travel along.
+                    "y": y + (chunk[0][3] - chunk[0][1]),
                     # get_baseline() is absolute (layout-origin-relative),
                     # same coordinate space as y_top -- draw position must
                     # track the *baseline* delta directly, not y_top plus
                     # baseline (that double-counts each line's ascent).
                     "lines": chunk, "origin_baseline": chunk[0][3],
+                    "top": y, "height": chunk_height,
+                    "panel": block.panel,
+                    # Only the fragment that ends the heading carries its
+                    # rule; a heading that wrapped across a page break
+                    # would otherwise get one on every page.
+                    "rule": block.rule if li >= len(lines) else None,
                 })
-                y += chunk_height
+                y += chunk_height + pad
                 if li < len(lines):
                     new_page()
+            y += rule_space
     if current or not pages:
         pages.append(current)
     return pages
@@ -473,43 +484,27 @@ def _draw_entry(cr, entry, page_width):
         cr.paint()
         cr.restore()
     elif entry["type"] == "layout":
-        for line, _y_top, _height, baseline in entry["lines"]:
-            cr.move_to(entry["x"], entry["y"] + (baseline - entry["origin_baseline"]))
-            PangoCairo.show_layout_line(cr, line)
-    elif entry["type"] == "layout-block":
         panel = entry["panel"]
-        y = entry["y"]
-        text_y = y
         if panel is not None:
-            text_y += panel["pad_top"]
-            text_w, text_h = entry["layout"].get_pixel_size()
-            panel_x = panel["x"]
-            panel_y = y
-            panel_w = text_w + panel["pad_left"] + panel["pad_right"]
-            panel_h = text_h + panel["pad_top"] + panel["pad_bottom"]
-            radius = panel["radius"]
-            x2, y2 = panel_x + panel_w, panel_y + panel_h
+            pad = panel["pad"]
             cr.save()
-            cr.new_sub_path()
-            cr.arc(x2 - radius, panel_y + radius, radius, -1.5707963267948966, 0.0)
-            cr.arc(x2 - radius, y2 - radius, radius, 0.0, 1.5707963267948966)
-            cr.arc(panel_x + radius, y2 - radius, radius, 1.5707963267948966, 3.141592653589793)
-            cr.arc(panel_x + radius, panel_y + radius, radius, 3.141592653589793, 4.71238898038469)
-            cr.close_path()
+            _rounded_rect(
+                cr, panel["x"], entry["top"] - pad,
+                panel["width"], entry["height"] + pad * 2, panel["radius"],
+            )
             cr.set_source_rgb(*panel["fill_rgb"])
             cr.fill()
             cr.restore()
-        cr.move_to(entry["x"], text_y)
-        PangoCairo.show_layout(cr, entry["layout"])
-        if entry["heading_rule"]:
-            text_w, text_h = entry["layout"].get_pixel_size()
-            line_y = text_y + text_h + HEADING_RULE_PAD_PT
-            r, g, b = entry["heading_rule_color"]
+        for line, _y_top, _height, baseline in entry["lines"]:
+            cr.move_to(entry["x"], entry["y"] + (baseline - entry["origin_baseline"]))
+            PangoCairo.show_layout_line(cr, line)
+        if entry["rule"] is not None:
+            rule_y = entry["top"] + entry["height"] + HEADING_RULE_PAD_PT
             cr.save()
-            cr.set_source_rgb(r, g, b)
+            cr.set_source_rgb(*entry["rule"])
             cr.set_line_width(HEADING_RULE_WIDTH_PT)
-            cr.move_to(entry["x"], line_y)
-            cr.line_to(page_width, line_y)
+            cr.move_to(entry["x"], rule_y)
+            cr.line_to(page_width, rule_y)
             cr.stroke()
             cr.restore()
 

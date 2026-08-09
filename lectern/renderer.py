@@ -34,6 +34,16 @@ def _task_checkbox_state(html_inline_content):
     return "checked" in html_inline_content
 
 
+def _without_trailing_newline(runs):
+    """A copy of `runs` with one trailing "\\n" removed from the last run
+    (dropping that run entirely if nothing else is left)."""
+    if not runs or not runs[-1][0].endswith("\n"):
+        return list(runs)
+    text, tags = runs[-1]
+    trimmed = text[:-1]
+    return list(runs[:-1]) + ([(trimmed, tags)] if trimmed else [])
+
+
 class PrintItem:
     __slots__ = ("kind", "runs", "block_tags", "rows", "language", "image")
 
@@ -77,6 +87,18 @@ class MarkdownRenderer:
         "hr": 24,
         "footnote_block": 16,
     }
+    # Padding, not margin: room a block needs for chrome painted *outside*
+    # its own text box -- decorated_textview.py's fenced-code panel. It is
+    # added to the neighbouring gap rather than collapsed into it, because
+    # a collapsed margin would put the neighbour's text where the panel is
+    # about to be drawn. Kept out of the code-block tag's own
+    # pixels-above/below-lines deliberately: those apply to *every* line
+    # of the fence, not just its first and last.
+    _BLOCK_PADDING = {"fence": tagdefs.CODE_BLOCK_PADDING}
+    # Blocks that only ever contain other blocks. Their last child already
+    # recorded whatever trailing padding is owed, so re-deriving it from
+    # the container's own type would throw that away.
+    _CONTAINER_BLOCKS = {"bullet_list", "ordered_list", "blockquote", "footnote_block"}
 
     def __init__(self):
         self.tag_table = None
@@ -100,6 +122,7 @@ class MarkdownRenderer:
         self._pending_anchors = []      # (anchor, widget) drained by caller
         self._instance_counter = 0
         self._prev_block_bottom = None
+        self._prev_block_padding = 0
         self._link_color = tagdefs.link_color_hex(dark=False)  # overwritten by render()
         self._base_dir = None                                  # ditto
 
@@ -108,6 +131,7 @@ class MarkdownRenderer:
     def render(self, tree, buffer, dark=False, base_dir=None):
         self.tag_table = buffer.get_tag_table()
         self._prev_block_bottom = None
+        self._prev_block_padding = 0
         self._link_color = tagdefs.link_color_hex(dark)
         # Directory the document lives in, for resolving relative image
         # paths -- the same base window.py resolves relative links against.
@@ -180,16 +204,21 @@ class MarkdownRenderer:
 
     def _walk_block_node(self, child, buffer, it, ctx):
         """Dispatch one block and apply collapsed-style inter-block spacing.
-        Gap before B is max(bottom(A), top(B)), then becomes B's bottom for
-        the next block.
+        Gap before B is max(bottom(A), top(B)) -- plus any padding either
+        side needs for chrome drawn outside its text box, which doesn't
+        collapse (see _BLOCK_PADDING). bottom(B) then carries to the next
+        block.
         """
         t = child.type
+        prev_padding = self._prev_block_padding
         start_mark = buffer.create_mark(None, it, True) if self._prev_block_bottom is not None else None
         self._dispatch_block_node(t, child, buffer, it, ctx)
         if start_mark is not None:
             gap = max(self._prev_block_bottom, self._BLOCK_TOP_MARGIN.get(t, 0))
-            self._apply_gap(buffer, start_mark, gap)
+            self._apply_gap(buffer, start_mark, gap + prev_padding + self._BLOCK_PADDING.get(t, 0))
         self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN.get(t, 0)
+        if t not in self._CONTAINER_BLOCKS:
+            self._prev_block_padding = self._BLOCK_PADDING.get(t, 0)
 
     def _dispatch_block_node(self, t, child, buffer, it, ctx):
         if t == "heading":
@@ -267,8 +296,13 @@ class MarkdownRenderer:
             runs.append((text, run_tags))
         if not code.endswith("\n"):
             buffer.insert(it, "\n")
+        # The buffer needs that final newline to end the block's last
+        # line; the print layout must not have it, or Pango adds an empty
+        # line whose height the code panel then pads around. Paragraphs
+        # already keep their terminator out of `runs` for the same reason.
         self.print_model.append(
-            PrintItem("code-block", runs=runs, block_tags=list(ctx.block_tags), language=language)
+            PrintItem("code-block", runs=_without_trailing_newline(runs),
+                      block_tags=list(ctx.block_tags), language=language)
         )
 
     def _emit_hr(self, buffer, it, ctx):
@@ -333,9 +367,13 @@ class MarkdownRenderer:
             # since items were previously packed with zero separation.
             needs_gap = index > 0
             start_mark = buffer.create_mark(None, it, True) if needs_gap else None
+            padding = self._prev_block_padding
             self._walk_list_item(item, buffer, it, child_ctx, ordered)
             if start_mark is not None:
-                self._apply_gap(buffer, start_mark, "list-item-gap")
+                self._apply_gap(
+                    buffer, start_mark,
+                    "list-item-gap" if not padding else tagdefs.LIST_ITEM_GAP + padding,
+                )
 
     def _walk_list_item(self, item, buffer, it, ctx, ordered):
         is_task = bool(item.attrs) and "task-list-item" in str(item.attrs.get("class", ""))
@@ -375,6 +413,7 @@ class MarkdownRenderer:
             buffer.insert_with_tags_by_name(it, marker_text, *(ctx.block_tags + [marker_tag]))
             self._emit_paragraph_body(first, buffer, it, ctx, runs)
             self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN["paragraph"]
+            self._prev_block_padding = 0
         else:
             buffer.insert_with_tags_by_name(it, marker_text + "\n", *(ctx.block_tags + [marker_tag]))
             self.print_model.append(
@@ -382,6 +421,7 @@ class MarkdownRenderer:
             )
             rest = block_children
             self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN["paragraph"]
+            self._prev_block_padding = 0
         for child in rest:
             self._walk_block_node(child, buffer, it, ctx)
 

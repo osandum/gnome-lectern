@@ -1,5 +1,26 @@
+"""A Gtk.TextView that paints the block chrome Gtk.TextTag can't express.
+
+`Gtk.TextTag` has no border property, and its two background properties
+are both wrong for what GitHub-style Markdown needs: `background-rgba`
+paints a tight rectangle hugging the glyph runs (no padding, no corner
+radius), and `paragraph-background-rgba` paints the full line width with
+no vertical padding and no radius either. So the three treatments that
+need a *box* -- the rule under h1/h2, the inline-code chip, and the
+fenced-code panel -- are drawn here instead, underneath the text, by
+overriding snapshot() and locating the tagged ranges with
+get_iter_location().
+
+Drawing a background larger than the text does not by itself create the
+space it occupies, so the padding constants below are paired with layout
+that reserves room for them: `heading{1,2}`'s pixels-below-lines in
+tags.py for the rule, and renderer.py's fence block margins (which add
+CODE_BLOCK_PADDING on top of the normal inter-block gap) for the code
+panel. Changing one without the other makes the chrome overlap its
+neighbours.
+"""
+import math
+
 import gi
-import cairo
 gi.require_foreign("cairo")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -8,13 +29,10 @@ from gi.repository import Gtk, Adw, Graphene
 
 from . import tags as tagdefs
 
-_INLINE_CODE_PAD_X = 4
-_INLINE_CODE_PAD_Y = 2
-_INLINE_CODE_RADIUS = 6
-_CODE_BLOCK_PAD = 16
-_CODE_BLOCK_RADIUS = 6
-_HEADING_RULE_PAD = 8
-_HEADING_RULE_WIDTH = 1
+# Slack (px) added around the visible rectangle when deciding which
+# tagged ranges to draw, so a chip or panel whose text sits just off
+# screen still has its padding painted at the viewport edge.
+_VISIBLE_SLACK = 64
 
 
 def _rounded_rect(cr, x, y, width, height, radius):
@@ -24,70 +42,96 @@ def _rounded_rect(cr, x, y, width, height, radius):
         return
     x2, y2 = x + width, y + height
     cr.new_sub_path()
-    cr.arc(x2 - radius, y + radius, radius, -1.5707963267948966, 0.0)
-    cr.arc(x2 - radius, y2 - radius, radius, 0.0, 1.5707963267948966)
-    cr.arc(x + radius, y2 - radius, radius, 1.5707963267948966, 3.141592653589793)
-    cr.arc(x + radius, y + radius, radius, 3.141592653589793, 4.71238898038469)
+    cr.arc(x2 - radius, y + radius, radius, -math.pi / 2, 0.0)
+    cr.arc(x2 - radius, y2 - radius, radius, 0.0, math.pi / 2)
+    cr.arc(x + radius, y2 - radius, radius, math.pi / 2, math.pi)
+    cr.arc(x + radius, y + radius, radius, math.pi, 3 * math.pi / 2)
     cr.close_path()
 
 
 class DecoratedTextView(Gtk.TextView):
-    def _tagged_ranges(self, tag):
+    # -- buffer/geometry helpers -------------------------------------------
+
+    def _visible_bounds(self):
+        """The buffer range worth drawing chrome for: everything on screen,
+        plus a little slack. Without this, every snapshot would walk (and
+        force layout validation of) the whole document."""
         buffer = self.get_buffer()
-        if buffer is None:
-            return []
+        rect = self.get_visible_rect()
+        if rect.height <= 0:
+            return buffer.get_bounds()
+        lo, _ = self.get_line_at_y(rect.y - _VISIBLE_SLACK)
+        hi, _ = self.get_line_at_y(rect.y + rect.height + _VISIBLE_SLACK)
+        if not hi.ends_line():
+            hi.forward_to_line_end()
+        return lo, hi
+
+    def _tagged_ranges(self, tag, lo, hi):
+        """(start, end) iter pairs where `tag` is applied, restricted to
+        [lo, hi] but extended outwards to whole ranges at both edges.
+
+        Every iter here is a fresh copy: Gtk.TextIter is mutable and
+        forward_to_tag_toggle() edits it in place, so handing the loop
+        variable itself to the caller would let a later iteration silently
+        drag an already-returned range's end forward -- which is exactly
+        how every chip and panel once grew to swallow the rest of the
+        document.
+        """
+        buffer = self.get_buffer()
         ranges = []
-        it = buffer.get_start_iter()
-        while it.forward_to_tag_toggle(tag):
+        it = lo.copy()
+        if it.has_tag(tag) and not it.starts_tag(tag):
+            it.backward_to_tag_toggle(tag)
+        while it.compare(hi) < 0:
             if not it.starts_tag(tag):
+                if not it.forward_to_tag_toggle(tag):
+                    break
                 continue
             start = it.copy()
-            end = start.copy()
+            end = it.copy()
             if not end.forward_to_tag_toggle(tag):
                 end = buffer.get_end_iter()
             ranges.append((start, end))
-            if end.compare(it) <= 0:
-                break
-            it = end
+            it = end.copy()
         return ranges
 
     def _segment_rect(self, start, end):
-        it = start.copy()
-        x0 = y0 = x1 = y1 = None
-        while it.compare(end) < 0:
-            rect = self.get_iter_location(it)
-            if x0 is None:
-                x0, y0 = rect.x, rect.y
-                x1, y1 = rect.x + rect.width, rect.y + rect.height
-            else:
-                x0 = min(x0, rect.x)
-                y0 = min(y0, rect.y)
-                x1 = max(x1, rect.x + rect.width)
-                y1 = max(y1, rect.y + rect.height)
-            if not it.forward_char():
-                break
-        if x0 is None:
-            return None
+        """Widget-coordinate rectangle covering one *display* line's worth
+        of a tagged range. Only the two endpoints are measured -- within a
+        single display line x grows monotonically, so the interior
+        characters can't extend the box."""
+        first = self.get_iter_location(start)
+        last_iter = end.copy()
+        if last_iter.compare(start) > 0:
+            last_iter.backward_char()
+        last = self.get_iter_location(last_iter)
+        x0 = min(first.x, last.x)
+        y0 = min(first.y, last.y)
+        x1 = max(first.x + first.width, last.x + last.width)
+        y1 = max(first.y + first.height, last.y + last.height)
         wx, wy = self.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, x0, y0)
         return (wx, wy, x1 - x0, y1 - y0)
 
-    def _line_segment_rects(self, start, end):
+    def _display_line_rects(self, start, end):
+        """Split a tagged range at display-line boundaries (not paragraph
+        boundaries) so a chip that wraps mid-phrase draws as one box per
+        visual line rather than one box spanning both."""
         rects = []
-        line_start = start.copy()
-        while line_start.compare(end) < 0:
-            line_end = line_start.copy()
-            if not line_end.ends_line():
-                line_end.forward_to_line_end()
-            if line_end.compare(end) > 0:
-                line_end = end.copy()
-            rect = self._segment_rect(line_start, line_end)
-            if rect is not None:
-                rects.append(rect)
-            if line_end.compare(end) >= 0:
+        seg_start = start.copy()
+        while seg_start.compare(end) < 0:
+            seg_end = seg_start.copy()
+            # No-op when seg_start already sits at a display line's end
+            # (an empty line inside a fenced block, most commonly), which
+            # is why advancing below goes by display *line* rather than by
+            # character -- a blank line would otherwise never move on.
+            self.forward_display_line_end(seg_end)
+            if seg_end.compare(seg_start) < 0:
+                seg_end.assign(seg_start)
+            if seg_end.compare(end) > 0:
+                seg_end.assign(end)
+            rects.append(self._segment_rect(seg_start, seg_end))
+            if not self.forward_display_line(seg_start):
                 break
-            line_start = line_end.copy()
-            if line_start.compare(end) < 0:
-                line_start.forward_char()
         return rects
 
     @staticmethod
@@ -100,82 +144,101 @@ class DecoratedTextView(Gtk.TextView):
         y1 = max(r[1] + r[3] for r in rects)
         return (x0, y0, x1 - x0, y1 - y0)
 
-    def _append_cairo(self, snapshot):
-        bounds = Graphene.Rect()
-        bounds.init(0, 0, self.get_allocated_width(), self.get_allocated_height())
-        return snapshot.append_cairo(bounds)
+    def _content_right(self):
+        return self.get_width() - self.get_right_margin()
 
     @staticmethod
     def _set_source_rgba(cr, rgba):
         cr.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
 
-    def _draw_inline_code(self, cr, buffer):
-        tag = buffer.get_tag_table().lookup("code-inline")
-        if tag is None:
-            return
-        bg = tag.get_property("background-rgba")
-        for start, end in self._tagged_ranges(tag):
-            for x, y, width, height in self._line_segment_rects(start, end):
-                _rounded_rect(
-                    cr,
-                    x - _INLINE_CODE_PAD_X,
-                    y - _INLINE_CODE_PAD_Y,
-                    width + _INLINE_CODE_PAD_X * 2,
-                    height + _INLINE_CODE_PAD_Y * 2,
-                    _INLINE_CODE_RADIUS,
-                )
-                self._set_source_rgba(cr, bg)
-                cr.fill()
+    # -- the three treatments ----------------------------------------------
 
-    def _draw_code_blocks(self, cr, buffer):
-        tag = buffer.get_tag_table().lookup("code-block")
-        if tag is None:
-            return
-        inline_tag = buffer.get_tag_table().lookup("code-inline")
-        bg = inline_tag.get_property("background-rgba") if inline_tag is not None else None
-        if bg is None:
-            return
-        for start, end in self._tagged_ranges(tag):
-            rect = self._union_rects(self._line_segment_rects(start, end))
+    def _draw_code_panels(self, cr, ranges, color):
+        """Full-content-width panel behind a fenced block, matching
+        GitHub's padding on all four sides. The panel's left edge is the
+        code text's own left margin minus that padding, which the
+        code-block tag sets so the edge lands exactly where surrounding
+        prose starts."""
+        pad = tagdefs.CODE_BLOCK_PADDING
+        for start, end in ranges:
+            rect = self._union_rects(self._display_line_rects(start, end))
             if rect is None:
                 continue
             x, y, width, height = rect
+            # A block with lines wider than the window keeps its panel
+            # under them rather than cutting it off at the viewport edge.
+            right = max(self._content_right(), x + width + pad)
             _rounded_rect(
-                cr,
-                x - _CODE_BLOCK_PAD,
-                y - _CODE_BLOCK_PAD,
-                width + _CODE_BLOCK_PAD * 2,
-                height + _CODE_BLOCK_PAD * 2,
-                _CODE_BLOCK_RADIUS,
+                cr, x - pad, y - pad, right - (x - pad), height + pad * 2,
+                tagdefs.CODE_BLOCK_RADIUS,
             )
-            self._set_source_rgba(cr, bg)
+            self._set_source_rgba(cr, color)
             cr.fill()
 
-    def _draw_heading_rules(self, cr, buffer):
-        dark = Adw.StyleManager.get_default().get_dark()
-        color = tagdefs.heading_rule_rgba(dark)
-        right = self.get_hadjustment().get_page_size() - self.get_right_margin()
-        for name in ("heading1", "heading2"):
-            tag = buffer.get_tag_table().lookup(name)
-            if tag is None:
-                continue
-            for start, end in self._tagged_ranges(tag):
-                rect = self._union_rects(self._line_segment_rects(start, end))
-                if rect is None:
-                    continue
-                x, y, width, height = rect
-                baseline = y + height + _HEADING_RULE_PAD
-                cr.set_line_width(_HEADING_RULE_WIDTH)
+    def _draw_code_chips(self, cr, ranges, color):
+        pad_x, pad_y = tagdefs.INLINE_CODE_PAD_X, tagdefs.INLINE_CODE_PAD_Y
+        for start, end in ranges:
+            # Per display line, not per range: a chip that wraps gets one
+            # box on each line rather than a single box spanning both.
+            for x, y, width, height in self._display_line_rects(start, end):
+                _rounded_rect(
+                    cr, x - pad_x, y - pad_y,
+                    width + pad_x * 2, height + pad_y * 2,
+                    tagdefs.INLINE_CODE_RADIUS,
+                )
                 self._set_source_rgba(cr, color)
-                cr.move_to(x, baseline)
-                cr.line_to(max(right, x + width), baseline)
-                cr.stroke()
+                cr.fill()
+
+    def _draw_heading_rules(self, cr, ranges):
+        color = tagdefs.heading_rule_rgba(Adw.StyleManager.get_default().get_dark())
+        right = self._content_right()
+        self._set_source_rgba(cr, color)
+        cr.set_line_width(tagdefs.HEADING_RULE_WIDTH)
+        for start, end in ranges:
+            rect = self._union_rects(self._display_line_rects(start, end))
+            if rect is None:
+                continue
+            x, y, width, height = rect
+            # Half-pixel offset so a 1px stroke lands on one device pixel
+            # instead of straddling two and rendering as a grey smear.
+            rule_y = round(y + height + tagdefs.HEADING_RULE_PAD) + 0.5
+            cr.move_to(x, rule_y)
+            cr.line_to(max(right, x + width), rule_y)
+            cr.stroke()
+
+    # -- snapshot ----------------------------------------------------------
 
     def do_snapshot(self, snapshot):
         buffer = self.get_buffer()
-        if buffer is not None:
-            cr = self._append_cairo(snapshot)
-            self._draw_code_blocks(cr, buffer)
-            self._draw_inline_code(cr, buffer)
-            self._draw_heading_rules(cr, buffer)
+        found = self._decorated_ranges(buffer) if buffer is not None else None
+        if found:
+            bounds = Graphene.Rect()
+            bounds.init(0, 0, self.get_width(), self.get_height())
+            cr = snapshot.append_cairo(bounds)
+            # One gray for both code treatments, read off the live
+            # code-inline tag so a light/dark flip repaints both without
+            # this module knowing anything about the palette.
+            code_tag = buffer.get_tag_table().lookup("code-inline")
+            color = code_tag.get_property("background-rgba") if code_tag else None
+            if color is not None:
+                self._draw_code_panels(cr, found.get("code-block", ()), color)
+                self._draw_code_chips(cr, found.get("code-inline", ()), color)
+            self._draw_heading_rules(
+                cr, found.get("heading1", []) + found.get("heading2", [])
+            )
         Gtk.TextView.do_snapshot(self, snapshot)
+
+    def _decorated_ranges(self, buffer):
+        """{tag name: [(start, end), ...]} for every decorated tag with
+        something in view, omitting the ones with nothing. Collected up
+        front so a viewport with no chrome in it skips the full-size Cairo
+        node entirely -- snapshot() runs on every scroll step."""
+        lo, hi = self._visible_bounds()
+        table = buffer.get_tag_table()
+        found = {}
+        for name in ("code-block", "code-inline", "heading1", "heading2"):
+            tag = table.lookup(name)
+            ranges = self._tagged_ranges(tag, lo, hi) if tag is not None else []
+            if ranges:
+                found[name] = ranges
+        return found

@@ -13,6 +13,7 @@ from markdown_it.tree import SyntaxTreeNode
 from lectern.document import make_parser
 from lectern.tags import create_tag_table
 from lectern.renderer import MarkdownRenderer
+from lectern.decorated_textview import DecoratedTextView
 from lectern import tags as tagdefs
 from lectern import zoom as zoomdefs
 
@@ -72,8 +73,11 @@ def test_heading_scales_match_github_ratios():
         tag = table.lookup(f"heading{level}")
         assert tag.get_property("scale") == pytest.approx(scale)
         assert tag.get_property("pixels-above-lines") == 0
-    assert table.lookup("heading1").get_property("pixels-below-lines") == 8
-    assert table.lookup("heading2").get_property("pixels-below-lines") == 8
+    # h1/h2 reserve room for the rule decorated_textview.py draws under
+    # them; h3 and below have no rule and so no reserved space.
+    rule_space = tagdefs.HEADING_RULE_PAD + tagdefs.HEADING_RULE_WIDTH
+    assert table.lookup("heading1").get_property("pixels-below-lines") == rule_space
+    assert table.lookup("heading2").get_property("pixels-below-lines") == rule_space
     assert table.lookup("heading3").get_property("pixels-below-lines") == 0
 
 
@@ -81,6 +85,70 @@ def test_github_spacing_constants():
     assert zoomdefs.BASE_PT == 12.0
     assert tagdefs.PROSE_LINE_SPACING == 6
     assert tagdefs.LIST_ITEM_GAP == 6
+
+
+def test_code_block_is_inset_within_the_content_column():
+    """The fenced-code panel is painted across the whole content column,
+    so the text has to sit CODE_BLOCK_PADDING inside it -- and Gtk.TextTag
+    margins *replace* the view's rather than adding to them, so the tag
+    has to spell out the sum."""
+    tag = create_tag_table(dark=False).lookup("code-block")
+    inset = tagdefs.CONTENT_MARGIN + tagdefs.CODE_BLOCK_PADDING
+    assert tag.get_property("left-margin") == inset
+    assert tag.get_property("right-margin") == inset
+
+
+def gap_above(buffer, substring):
+    """The pixels-above-lines the block starting at `substring` was given,
+    or None if it carries no block-gap tag."""
+    it = buffer.get_iter_at_offset(buffer_text(buffer).index(substring))
+    gaps = [
+        tag for tag in it.get_tags()
+        if (tag.get_property("name") or "").startswith("block-gap-")
+    ]
+    assert len(gaps) <= 1
+    return gaps[0].get_property("pixels-above-lines") if gaps else None
+
+
+def tagged_range_texts(buffer, tag_name):
+    view = DecoratedTextView()
+    view.set_buffer(buffer)
+    tag = buffer.get_tag_table().lookup(tag_name)
+    lo, hi = buffer.get_bounds()
+    return [buffer.get_text(s, e, True) for s, e in view._tagged_ranges(tag, lo, hi)]
+
+
+def test_tagged_ranges_do_not_bleed_into_each_other():
+    """Regression: Gtk.TextIter is mutable and forward_to_tag_toggle()
+    edits in place, so handing the walk's own iter out as a range end let
+    each later iteration drag an already-returned end forward -- every
+    code chip and heading rule grew to cover the rest of the document."""
+    _renderer, buffer = render("Text with `one` and `two` in it.\n")
+    assert tagged_range_texts(buffer, "code-inline") == ["one", "two"]
+
+
+def test_tagged_ranges_include_a_tag_starting_at_the_buffer_start():
+    """The first toggle found from the buffer start is the *closing* one
+    when the tag opens at offset 0, which is exactly where a document's
+    h1 lives."""
+    _renderer, buffer = render("# Title\n\nBody text.\n")
+    assert tagged_range_texts(buffer, "heading1") == ["Title"]
+
+
+def test_fence_gap_reserves_room_for_the_code_panel():
+    """The panel is drawn CODE_BLOCK_PADDING outside the code text's own
+    box on all four sides; vertically that room has to come from the
+    inter-block gaps, or the panel paints over its neighbours."""
+    _renderer, buffer = render("Intro.\n\n```\ncode\n```\n\nAfter.\n")
+    assert gap_above(buffer, "code") == 16 + tagdefs.CODE_BLOCK_PADDING
+    assert gap_above(buffer, "After.") == 16 + tagdefs.CODE_BLOCK_PADDING
+
+
+def test_fence_inside_a_list_item_pads_the_following_item():
+    """Padding is not a margin: the fixed list-item gap collapses against
+    nothing, so the panel's bottom padding has to be added to it."""
+    _renderer, buffer = render("- one\n\n  ```\n  code\n  ```\n\n- two\n")
+    assert gap_above(buffer, "two") == tagdefs.LIST_ITEM_GAP + tagdefs.CODE_BLOCK_PADDING
 
 
 def test_collapsed_gap_uses_neighbor_margins():
