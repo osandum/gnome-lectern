@@ -6,6 +6,7 @@ environments with no display at all.
 import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk
+import pytest
 
 from markdown_it.tree import SyntaxTreeNode
 
@@ -62,6 +63,37 @@ def test_headings_get_level_specific_tags():
     assert tag_at(buffer, "Six", "heading6")
 
 
+def test_heading_scales_match_github_ratios():
+    table = create_tag_table(dark=False)
+    expected = [2.0, 1.5, 1.25, 1.0, 0.875, 0.85]
+    for level, scale in enumerate(expected, start=1):
+        tag = table.lookup(f"heading{level}")
+        assert tag.get_property("scale") == pytest.approx(scale)
+        assert tag.get_property("pixels-above-lines") == 0
+        assert tag.get_property("pixels-below-lines") == 0
+
+
+def test_collapsed_gap_uses_neighbor_margins():
+    _renderer, buffer = render("Paragraph\n\n# Heading\n\nParagraph two\n")
+    text = buffer_text(buffer)
+
+    heading_it = buffer.get_iter_at_offset(text.index("Heading"))
+    heading_gap_tags = [
+        tag for tag in heading_it.get_tags()
+        if (tag.get_property("name") or "").startswith("block-gap-")
+    ]
+    assert len(heading_gap_tags) == 1
+    assert heading_gap_tags[0].get_property("pixels-above-lines") == 24
+
+    paragraph_it = buffer.get_iter_at_offset(text.index("Paragraph two"))
+    paragraph_gap_tags = [
+        tag for tag in paragraph_it.get_tags()
+        if (tag.get_property("name") or "").startswith("block-gap-")
+    ]
+    assert len(paragraph_gap_tags) == 1
+    assert paragraph_gap_tags[0].get_property("pixels-above-lines") == 16
+
+
 def test_inline_code_tag():
     _renderer, buffer = render("call `f(x)` now\n")
     assert tag_at(buffer, "f(x)", "code-inline")
@@ -85,6 +117,8 @@ def test_list_indent_levels_nest_correctly():
     assert tag_at(buffer, "nested", "list-indent-0")  # inherits parent's own indent too
     assert tag_at(buffer, "nested", "list-indent-1")
     assert tag_at(buffer, "double nested", "list-indent-2")
+    indent0 = buffer.get_tag_table().lookup("list-indent-0")
+    assert indent0.get_property("left-margin") == 30
 
 
 def test_ordered_list_uses_source_numbering():
