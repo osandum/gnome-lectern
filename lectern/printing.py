@@ -25,6 +25,10 @@ HR_BLOCK_HEIGHT_PT = 16.0
 TABLE_CELL_PAD_PT = 6.0
 TABLE_ROW_GAP_PT = 6.0
 TABLE_RULE_RGB = (0.7, 0.7, 0.7)
+CODE_BLOCK_PAD_PT = 12.0
+CODE_BLOCK_RADIUS_PT = 4.5
+HEADING_RULE_WIDTH_PT = 1.0
+HEADING_RULE_PAD_PT = 6.0
 # Image pixels are nominally 96dpi; print units are 72dpi points.
 IMAGE_PX_TO_PT = 72.0 / 96.0
 # Cap on how much of one page a single image may claim, so a very tall
@@ -49,6 +53,10 @@ def _foreground_attr(rgba):
     return Pango.attr_foreground_new(
         int(rgba.red * 65535), int(rgba.green * 65535), int(rgba.blue * 65535)
     )
+
+
+def _rgba_rgb(rgba):
+    return rgba.red, rgba.green, rgba.blue
 
 
 def _left_margin_pt(block_tags):
@@ -167,13 +175,25 @@ class _Block:
         self.pixbuf = None
         self.draw_size = None
         self.height = 0.0
+        self.atomic = False
+        self.panel = None
+        self.heading_rule = False
+        self.heading_rule_color = None
 
     @classmethod
-    def text(cls, x, layout):
+    def text(cls, x, layout, *, atomic=False, panel=None, heading_rule=False, heading_rule_color=None):
         block = cls("layout", x)
         block.layout = layout
         block.lines = _line_geometry(layout)
-        block.height = (block.lines[-1][1] + block.lines[-1][2]) if block.lines else 0.0
+        text_height = (block.lines[-1][1] + block.lines[-1][2]) if block.lines else 0.0
+        panel_top = panel["pad_top"] if panel else 0.0
+        panel_bottom = panel["pad_bottom"] if panel else 0.0
+        rule_extra = (HEADING_RULE_PAD_PT + HEADING_RULE_WIDTH_PT) if heading_rule else 0.0
+        block.height = text_height + panel_top + panel_bottom + rule_extra
+        block.atomic = atomic
+        block.panel = panel
+        block.heading_rule = heading_rule
+        block.heading_rule_color = heading_rule_color
         return block
 
     @classmethod
@@ -228,8 +248,12 @@ def _image_draw_size(pixbuf, max_width_pt, max_height_pt):
     return natural_w * scale, natural_h * scale
 
 
-def _build_blocks(context, style_table, print_model, page_width, page_height):
+def _build_blocks(context, style_table, print_model, page_width, page_height, dark):
     blocks = []
+    code_bg = style_table.get("code-inline", {}).get("background-rgba")
+    code_bg_rgb = _rgba_rgb(code_bg) if code_bg is not None else None
+    heading_rule = tagdefs.heading_rule_rgba(dark)
+    heading_rule_rgb = _rgba_rgb(heading_rule)
     for item in print_model:
         if item.kind == "image":
             x = _left_margin_pt(item.block_tags)
@@ -249,10 +273,33 @@ def _build_blocks(context, style_table, print_model, page_width, page_height):
                     context, style_table, _AltTextItem(alt, item.block_tags), page_width - x
                 )
                 blocks.append(_Block.text(x, layout))
-        elif item.kind in ("paragraph", "code-block"):
+        elif item.kind == "paragraph":
             x = _left_margin_pt(item.block_tags)
             layout = _build_text_layout(context, style_table, item, page_width - x)
-            blocks.append(_Block.text(x, layout))
+            run_tags = {tag for _text, tags in item.runs for tag in tags}
+            has_rule = "heading1" in run_tags or "heading2" in run_tags
+            blocks.append(
+                _Block.text(
+                    x,
+                    layout,
+                    atomic=has_rule,
+                    heading_rule=has_rule,
+                    heading_rule_color=heading_rule_rgb,
+                )
+            )
+        elif item.kind == "code-block":
+            x = _left_margin_pt(item.block_tags)
+            layout = _build_text_layout(context, style_table, item, page_width - x - 2 * CODE_BLOCK_PAD_PT)
+            panel = {
+                "x": x,
+                "pad_top": CODE_BLOCK_PAD_PT,
+                "pad_bottom": CODE_BLOCK_PAD_PT,
+                "pad_left": CODE_BLOCK_PAD_PT,
+                "pad_right": CODE_BLOCK_PAD_PT,
+                "radius": CODE_BLOCK_RADIUS_PT,
+                "fill_rgb": code_bg_rgb or (0.96, 0.96, 0.96),
+            }
+            blocks.append(_Block.text(x + CODE_BLOCK_PAD_PT, layout, atomic=True, panel=panel))
         elif item.kind == "hr":
             blocks.append(_Block.hr())
         elif item.kind == "table":
@@ -330,6 +377,21 @@ def _paginate(blocks, page_height):
                 if i < len(row_layouts):
                     new_page()
         else:  # "layout": paragraph or code-block
+            if block.atomic:
+                if y + gap + block.height > page_height and current:
+                    new_page()
+                    gap = 0.0
+                current.append({
+                    "type": "layout-block",
+                    "x": block.x,
+                    "y": y + gap,
+                    "layout": block.layout,
+                    "panel": block.panel,
+                    "heading_rule": block.heading_rule,
+                    "heading_rule_color": block.heading_rule_color,
+                })
+                y += gap + block.height
+                continue
             if current and _out_of_room(y, gap, page_height):
                 new_page()
                 gap = 0.0
@@ -414,6 +476,42 @@ def _draw_entry(cr, entry, page_width):
         for line, _y_top, _height, baseline in entry["lines"]:
             cr.move_to(entry["x"], entry["y"] + (baseline - entry["origin_baseline"]))
             PangoCairo.show_layout_line(cr, line)
+    elif entry["type"] == "layout-block":
+        panel = entry["panel"]
+        y = entry["y"]
+        text_y = y
+        if panel is not None:
+            text_y += panel["pad_top"]
+            text_w, text_h = entry["layout"].get_pixel_size()
+            panel_x = panel["x"]
+            panel_y = y
+            panel_w = text_w + panel["pad_left"] + panel["pad_right"]
+            panel_h = text_h + panel["pad_top"] + panel["pad_bottom"]
+            radius = panel["radius"]
+            x2, y2 = panel_x + panel_w, panel_y + panel_h
+            cr.save()
+            cr.new_sub_path()
+            cr.arc(x2 - radius, panel_y + radius, radius, -1.5707963267948966, 0.0)
+            cr.arc(x2 - radius, y2 - radius, radius, 0.0, 1.5707963267948966)
+            cr.arc(panel_x + radius, y2 - radius, radius, 1.5707963267948966, 3.141592653589793)
+            cr.arc(panel_x + radius, panel_y + radius, radius, 3.141592653589793, 4.71238898038469)
+            cr.close_path()
+            cr.set_source_rgb(*panel["fill_rgb"])
+            cr.fill()
+            cr.restore()
+        cr.move_to(entry["x"], text_y)
+        PangoCairo.show_layout(cr, entry["layout"])
+        if entry["heading_rule"]:
+            text_w, text_h = entry["layout"].get_pixel_size()
+            line_y = text_y + text_h + HEADING_RULE_PAD_PT
+            r, g, b = entry["heading_rule_color"]
+            cr.save()
+            cr.set_source_rgb(r, g, b)
+            cr.set_line_width(HEADING_RULE_WIDTH_PT)
+            cr.move_to(entry["x"], line_y)
+            cr.line_to(page_width, line_y)
+            cr.stroke()
+            cr.restore()
 
 
 class PrintCoordinator:
@@ -434,7 +532,7 @@ class PrintCoordinator:
         style_table = tagdefs.tag_style_props(dark)
         width, height = context.get_width(), context.get_height()
         state["width"] = width
-        blocks = _build_blocks(context, style_table, print_model, width, height)
+        blocks = _build_blocks(context, style_table, print_model, width, height, dark)
         # Pango.LayoutLine keeps only a *weak* back-reference to its parent
         # Pango.Layout -- without this, `blocks` (and therefore every
         # Layout) would be garbage collected the moment this method

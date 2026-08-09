@@ -17,6 +17,7 @@ _LIGHT = {
     "dim": "#5e5c64",
     "link": "#1a5fb4",
     "code-bg": "#f6f5f4",
+    "heading-rule": "#d8dee4",
     "pyg-keyword": "#a51e75",
     "pyg-string": "#26a269",
     "pyg-comment": "#77767b",
@@ -32,6 +33,7 @@ _DARK = {
     "dim": "#9a9996",
     "link": "#62a0ea",
     "code-bg": "#2d2d2d",
+    "heading-rule": "#3d444d",
     "pyg-keyword": "#dc8add",
     "pyg-string": "#8ff0a4",
     "pyg-comment": "#9a9996",
@@ -53,11 +55,11 @@ _HEADING_SCALE = [2.0, 1.5, 1.25, 1.0, 0.875, 0.85]
 # "prose" tag below (see renderer.py's root RenderCtx), not per block
 # type, since it's a base body-text property everything else layers on
 # top of.
-PROSE_LINE_SPACING = 3
+PROSE_LINE_SPACING = 6
 
-# Space above every list item after a list's first, aligned to GitHub's
-# li + li = 0.25em target.
-LIST_ITEM_GAP = 4
+# Space above every list item after a list's first. Deliberately larger
+# than GitHub's li + li = 0.25em because that reads too tight in Lectern.
+LIST_ITEM_GAP = 6
 
 # Indent step, in pixels, per nesting level of list content (~2em).
 LIST_INDENT_STEP = 30
@@ -89,6 +91,10 @@ def link_color_hex(dark):
     minor known limitation rather than building live-recolor plumbing
     for it."""
     return (_DARK if dark else _LIGHT)["link"]
+
+
+def heading_rule_rgba(dark):
+    return _rgba((_DARK if dark else _LIGHT)["heading-rule"])
 
 
 @functools.lru_cache(maxsize=2)
@@ -172,6 +178,8 @@ def tag_style_props(dark):
             "weight": Pango.Weight.BOLD,
             "scale": _HEADING_SCALE[i],
         }
+    props["heading1"]["pixels-below-lines"] = 8
+    props["heading2"]["pixels-below-lines"] = 8
     for name in PYGMENTS_TAG_NAMES:
         props[name] = {"foreground-rgba": _rgba(palette[name])}
     return props

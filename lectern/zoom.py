@@ -8,7 +8,7 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gtk, Gdk, GObject
 
 STEPS = [0.5, 0.67, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 3.0, 4.0]
-BASE_PT = 11.0
+BASE_PT = 12.0
 DEFAULT_INDEX = STEPS.index(1.0)
 
 # Unique per-instance CSS class so each window's provider only ever

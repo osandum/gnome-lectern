@@ -13,6 +13,8 @@ from markdown_it.tree import SyntaxTreeNode
 from lectern.document import make_parser
 from lectern.tags import create_tag_table
 from lectern.renderer import MarkdownRenderer
+from lectern import tags as tagdefs
+from lectern import zoom as zoomdefs
 
 # One parser reused across every test in this module, both to avoid
 # rebuilding it ~13 times over and to test against the exact same
@@ -70,7 +72,15 @@ def test_heading_scales_match_github_ratios():
         tag = table.lookup(f"heading{level}")
         assert tag.get_property("scale") == pytest.approx(scale)
         assert tag.get_property("pixels-above-lines") == 0
-        assert tag.get_property("pixels-below-lines") == 0
+    assert table.lookup("heading1").get_property("pixels-below-lines") == 8
+    assert table.lookup("heading2").get_property("pixels-below-lines") == 8
+    assert table.lookup("heading3").get_property("pixels-below-lines") == 0
+
+
+def test_github_spacing_constants():
+    assert zoomdefs.BASE_PT == 12.0
+    assert tagdefs.PROSE_LINE_SPACING == 6
+    assert tagdefs.LIST_ITEM_GAP == 6
 
 
 def test_collapsed_gap_uses_neighbor_margins():
