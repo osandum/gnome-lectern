@@ -65,10 +65,18 @@ class MarkdownRenderer:
     instance is used for every reload so nothing leaks between renders.
     """
 
-    # Node types that either carry their own spacing (heading) or already
-    # get a visual margin from an embedded widget (hr's Gtk.Separator,
-    # table's Gtk.Frame) -- see _walk_block_node's block-gap wrapping.
-    _BLOCK_GAP_EXCLUDED = {"heading", "hr", "table", "footnote_block"}
+    _BLOCK_TOP_MARGIN = {"heading": 24, "hr": 24, "footnote_block": 24}
+    _BLOCK_BOTTOM_MARGIN = {
+        "paragraph": 16,
+        "bullet_list": 16,
+        "ordered_list": 16,
+        "blockquote": 16,
+        "fence": 16,
+        "table": 16,
+        "heading": 16,
+        "hr": 24,
+        "footnote_block": 16,
+    }
 
     def __init__(self):
         self.tag_table = None
@@ -91,7 +99,7 @@ class MarkdownRenderer:
         self._footnote_def_marks = {}   # label -> mark name
         self._pending_anchors = []      # (anchor, widget) drained by caller
         self._instance_counter = 0
-        self._emitted_any_block = False
+        self._prev_block_bottom = None
         self._link_color = tagdefs.link_color_hex(dark=False)  # overwritten by render()
         self._base_dir = None                                  # ditto
 
@@ -99,6 +107,7 @@ class MarkdownRenderer:
 
     def render(self, tree, buffer, dark=False, base_dir=None):
         self.tag_table = buffer.get_tag_table()
+        self._prev_block_bottom = None
         self._link_color = tagdefs.link_color_hex(dark)
         # Directory the document lives in, for resolving relative image
         # paths -- the same base window.py resolves relative links against.
@@ -170,19 +179,17 @@ class MarkdownRenderer:
             self._walk_block_node(child, buffer, it, ctx)
 
     def _walk_block_node(self, child, buffer, it, ctx):
-        """Dispatches to the per-type handler below, wrapping it with a
-        "space above this block" tag applied to only the block's *first*
-        buffer line (see tags.py's BLOCK_GAP_ABOVE for why: naively tagging
-        a whole multi-line block, as code-block used to, stacks spacing at
-        every interior line boundary instead of just the block's edges).
+        """Dispatch one block and apply collapsed-style inter-block spacing.
+        Gap before B is max(bottom(A), top(B)), then becomes B's bottom for
+        the next block.
         """
         t = child.type
-        needs_gap = self._emitted_any_block and t not in self._BLOCK_GAP_EXCLUDED
-        start_mark = buffer.create_mark(None, it, True) if needs_gap else None
+        start_mark = buffer.create_mark(None, it, True) if self._prev_block_bottom is not None else None
         self._dispatch_block_node(t, child, buffer, it, ctx)
         if start_mark is not None:
-            self._apply_gap(buffer, start_mark, "block-gap")
-        self._emitted_any_block = True
+            gap = max(self._prev_block_bottom, self._BLOCK_TOP_MARGIN.get(t, 0))
+            self._apply_gap(buffer, start_mark, gap)
+        self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN.get(t, 0)
 
     def _dispatch_block_node(self, t, child, buffer, it, ctx):
         if t == "heading":
@@ -206,15 +213,17 @@ class MarkdownRenderer:
         # scope cut, not requested.
 
     @staticmethod
-    def _apply_gap(buffer, start_mark, tag_name):
-        """Apply `tag_name` (pixels-above-lines only -- see tags.py) to
-        just the first buffer line starting at `start_mark`. Shared by
-        block-gap (between top-level blocks) and list-item-gap (between
-        items within one list) -- same mechanism, different tag/scope."""
+    def _apply_gap(buffer, start_mark, gap):
+        """Apply top spacing to just the first buffer line at `start_mark`."""
         start_iter = buffer.get_iter_at_mark(start_mark)
         end_iter = start_iter.copy()
         if not end_iter.ends_line():
             end_iter.forward_to_line_end()
+        if isinstance(gap, str):
+            tag_name = gap
+        else:
+            tag = tagdefs.ensure_block_gap_tag(buffer.get_tag_table(), gap)
+            tag_name = tag.get_property("name")
         buffer.apply_tag_by_name(tag_name, start_iter, end_iter)
         buffer.delete_mark(start_mark)
 
@@ -265,8 +274,6 @@ class MarkdownRenderer:
     def _emit_hr(self, buffer, it, ctx):
         anchor = buffer.create_child_anchor(it)
         separator = Gtk.Separator(hexpand=True)
-        separator.set_margin_top(8)
-        separator.set_margin_bottom(8)
         self._pending_anchors.append((anchor, separator))
         buffer.insert(it, "\n")
         self.print_model.append(PrintItem("hr", block_tags=list(ctx.block_tags)))
@@ -367,12 +374,14 @@ class MarkdownRenderer:
             runs = [(marker_text, [marker_tag])]
             buffer.insert_with_tags_by_name(it, marker_text, *(ctx.block_tags + [marker_tag]))
             self._emit_paragraph_body(first, buffer, it, ctx, runs)
+            self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN["paragraph"]
         else:
             buffer.insert_with_tags_by_name(it, marker_text + "\n", *(ctx.block_tags + [marker_tag]))
             self.print_model.append(
                 PrintItem("paragraph", runs=[(marker_text, [marker_tag])], block_tags=list(ctx.block_tags))
             )
             rest = block_children
+            self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN["paragraph"]
         for child in rest:
             self._walk_block_node(child, buffer, it, ctx)
 
