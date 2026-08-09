@@ -45,7 +45,7 @@ def _without_trailing_newline(runs):
 
 
 class PrintItem:
-    __slots__ = ("kind", "runs", "block_tags", "rows", "language", "image")
+    __slots__ = ("kind", "runs", "block_tags", "rows", "language", "image", "gap")
 
     def __init__(self, kind, runs=None, block_tags=None, rows=None, language=None, image=None):
         self.kind = kind
@@ -53,6 +53,13 @@ class PrintItem:
         self.block_tags = block_tags or []
         self.rows = rows
         self.language = language
+        # Space above this block, in the same screen pixels the buffer's
+        # block-gap tags use, filled in by the walker once the collapsed
+        # margin is known. Printing scales it to points rather than
+        # inventing a spacing model of its own -- that is what used to
+        # make printed lists and headings space differently from the
+        # screen.
+        self.gap = 0
         # For "image": the live images.ImageView. Printing reads its
         # texture at print time rather than at render time, so an image
         # the reader loaded after opening the document still prints.
@@ -212,10 +219,13 @@ class MarkdownRenderer:
         t = child.type
         prev_padding = self._prev_block_padding
         start_mark = buffer.create_mark(None, it, True) if self._prev_block_bottom is not None else None
+        first_item = len(self.print_model)
         self._dispatch_block_node(t, child, buffer, it, ctx)
         if start_mark is not None:
             gap = max(self._prev_block_bottom, self._BLOCK_TOP_MARGIN.get(t, 0))
-            self._apply_gap(buffer, start_mark, gap + prev_padding + self._BLOCK_PADDING.get(t, 0))
+            gap += prev_padding + self._BLOCK_PADDING.get(t, 0)
+            self._apply_gap(buffer, start_mark, gap)
+            self._record_print_gap(first_item, gap)
         self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN.get(t, 0)
         if t not in self._CONTAINER_BLOCKS:
             self._prev_block_padding = self._BLOCK_PADDING.get(t, 0)
@@ -240,6 +250,13 @@ class MarkdownRenderer:
             self._walk_footnote_block(child, buffer, it, ctx)
         # Anything else (raw html_block, etc.) is silently skipped -- v1
         # scope cut, not requested.
+
+    def _record_print_gap(self, first_item, gap):
+        """Give the print item a block's spacing wound up on -- the first
+        one it emitted, matching the buffer line the gap tag went on. A
+        block that emitted nothing to print (an empty table) has none."""
+        if first_item < len(self.print_model):
+            self.print_model[first_item].gap = gap
 
     @staticmethod
     def _tag_first_line(buffer, start_mark, tag_name, delete_mark=True):
@@ -383,12 +400,14 @@ class MarkdownRenderer:
             needs_gap = index > 0
             start_mark = buffer.create_mark(None, it, True) if needs_gap else None
             padding = self._prev_block_padding
+            first_item = len(self.print_model)
             self._walk_list_item(item, buffer, it, child_ctx, ordered)
             if start_mark is not None:
-                self._apply_gap(
-                    buffer, start_mark,
-                    "list-item-gap" if not padding else tagdefs.LIST_ITEM_GAP + padding,
-                )
+                gap = tagdefs.LIST_ITEM_GAP + padding
+                # The padding-free case reuses the static tag rather than
+                # minting an identical block-gap-6 one per document.
+                self._apply_gap(buffer, start_mark, "list-item-gap" if not padding else gap)
+                self._record_print_gap(first_item, gap)
 
     def _walk_list_item(self, item, buffer, it, ctx, ordered):
         is_task = bool(item.attrs) and "task-list-item" in str(item.attrs.get("class", ""))
