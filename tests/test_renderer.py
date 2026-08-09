@@ -192,11 +192,32 @@ def test_list_indent_levels_nest_correctly():
     markdown_text = "- one\n  - nested\n    - double nested\n"
     _renderer, buffer = render(markdown_text)
     assert tag_at(buffer, "one", "list-indent-0")
-    assert tag_at(buffer, "nested", "list-indent-0")  # inherits parent's own indent too
+    # A nested list is one of its parent item's later blocks, so it
+    # inherits the parent's *text* column, not its marker column.
+    assert tag_at(buffer, "nested", "list-body-0")
     assert tag_at(buffer, "nested", "list-indent-1")
     assert tag_at(buffer, "double nested", "list-indent-2")
-    indent0 = buffer.get_tag_table().lookup("list-indent-0")
-    assert indent0.get_property("left-margin") == 30
+    table = buffer.get_tag_table()
+    assert table.lookup("list-indent-0").get_property("left-margin") == 30
+    assert table.lookup("list-indent-1").get_property("left-margin") == 60
+
+
+def test_list_item_body_sits_on_the_text_column():
+    """A list item's marker line starts at the marker column and hangs;
+    everything after it -- wrapped lines and continuation blocks alike --
+    lines up one hanging indent further in, under the item's text."""
+    _renderer, buffer = render("- one\n\n  continuation\n")
+    table = buffer.get_tag_table()
+    marker_column = table.lookup("list-indent-0").get_property("left-margin")
+    text_column = table.lookup("list-body-0").get_property("left-margin")
+    assert text_column == marker_column - tagdefs.LIST_HANGING_INDENT
+
+    # The hang is on the marker's line alone: on the shared list-indent
+    # tag it would also pull a continuation block's first line out into
+    # the marker column, where there is no marker to put.
+    assert tag_at(buffer, "one", "list-hang")
+    assert not tag_at(buffer, "continuation", "list-hang")
+    assert tag_at(buffer, "continuation", "list-body-0")
 
 
 def test_ordered_list_uses_source_numbering():

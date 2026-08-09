@@ -242,19 +242,28 @@ class MarkdownRenderer:
         # scope cut, not requested.
 
     @staticmethod
-    def _apply_gap(buffer, start_mark, gap):
-        """Apply top spacing to just the first buffer line at `start_mark`."""
+    def _tag_first_line(buffer, start_mark, tag_name, delete_mark=True):
+        """Apply a paragraph-level tag to just the first buffer line at
+        `start_mark` -- the only way to give a block's opening line
+        spacing or an indent of its own, since Gtk.TextTag properties like
+        pixels-above-lines and indent apply to every line they cover."""
         start_iter = buffer.get_iter_at_mark(start_mark)
         end_iter = start_iter.copy()
         if not end_iter.ends_line():
             end_iter.forward_to_line_end()
+        buffer.apply_tag_by_name(tag_name, start_iter, end_iter)
+        if delete_mark:
+            buffer.delete_mark(start_mark)
+
+    @classmethod
+    def _apply_gap(cls, buffer, start_mark, gap):
+        """Apply top spacing to just the first buffer line at `start_mark`."""
         if isinstance(gap, str):
             tag_name = gap
         else:
             tag = tagdefs.ensure_block_gap_tag(buffer.get_tag_table(), gap)
             tag_name = tag.get_property("name")
-        buffer.apply_tag_by_name(tag_name, start_iter, end_iter)
-        buffer.delete_mark(start_mark)
+        cls._tag_first_line(buffer, start_mark, tag_name)
 
     def _emit_simple_paragraph(self, node, buffer, it, ctx, extra_tag=None):
         inline_tags = [extra_tag] if extra_tag else []
@@ -356,7 +365,13 @@ class MarkdownRenderer:
     # -- lists / task lists -----------------------------------------------
 
     def _walk_list(self, node, buffer, it, ctx, ordered):
-        level = sum(1 for t in ctx.block_tags if t.startswith("list-indent-"))
+        # Both names count: a list nested inside an item's continuation
+        # blocks sees its ancestor as a "list-body-" tag, and missing it
+        # would restart the nesting at level 0.
+        level = sum(
+            1 for t in ctx.block_tags
+            if t.startswith("list-indent-") or t.startswith("list-body-")
+        )
         indent_tag = tagdefs.ensure_list_indent_tag(self.tag_table, level)
         child_ctx = ctx.push_block(indent_tag.get_property("name"))
         for index, item in enumerate(node.children):
@@ -388,7 +403,26 @@ class MarkdownRenderer:
         else:
             marker_text = "•  "  # •
             marker_tag = "list-marker"
-        self._walk_block_with_marker(block_children, buffer, it, ctx, marker_text, marker_tag)
+        self._walk_block_with_marker(
+            block_children, buffer, it, ctx, marker_text, marker_tag,
+            hang=True, body_ctx=self._list_body_ctx(ctx),
+        )
+
+    def _list_body_ctx(self, ctx):
+        """`ctx` with this list level's marker column swapped for its text
+        column, for the blocks of an item that follow the one carrying the
+        marker -- they line up under the item's text, not under its
+        bullet."""
+        for i in range(len(ctx.block_tags) - 1, -1, -1):
+            name = ctx.block_tags[i]
+            if not name.startswith("list-indent-"):
+                continue
+            level = int(name.rsplit("-", 1)[1])
+            body = tagdefs.ensure_list_body_tag(self.tag_table, level)
+            tags = list(ctx.block_tags)
+            tags[i] = body.get_property("name")
+            return RenderCtx(tags)
+        return ctx
 
     def _detect_task_checked(self, block_children):
         if not block_children or block_children[0].type != "paragraph":
@@ -403,10 +437,18 @@ class MarkdownRenderer:
                     return state
         return False
 
-    def _walk_block_with_marker(self, block_children, buffer, it, ctx, marker_text, marker_tag):
+    def _walk_block_with_marker(self, block_children, buffer, it, ctx, marker_text,
+                                marker_tag, hang=False, body_ctx=None):
         """Shared by list items and footnote definitions: render `marker_text`
         immediately before the first paragraph's content (same visual line),
-        then walk any remaining block children normally."""
+        then walk any remaining block children normally.
+
+        `hang` gives that one line the hanging indent that puts the marker
+        left of the item's text (list items; footnote definitions have no
+        indent to hang out of), and `body_ctx` is the context the
+        remaining blocks are walked in -- the item's text column rather
+        than its marker column."""
+        hang_mark = buffer.create_mark(None, it, True) if hang else None
         if block_children and block_children[0].type == "paragraph":
             first, rest = block_children[0], block_children[1:]
             runs = [(marker_text, [marker_tag])]
@@ -422,8 +464,10 @@ class MarkdownRenderer:
             rest = block_children
             self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN["paragraph"]
             self._prev_block_padding = 0
+        if hang_mark is not None:
+            self._tag_first_line(buffer, hang_mark, "list-hang")
         for child in rest:
-            self._walk_block_node(child, buffer, it, ctx)
+            self._walk_block_node(child, buffer, it, body_ctx or ctx)
 
     # -- footnotes -------------------------------------------------------
 

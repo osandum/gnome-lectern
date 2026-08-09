@@ -168,6 +168,13 @@ def tag_style_props(dark):
         # Renderer-created dynamic block-gap-* tags carry the actual
         # inter-block top spacing value.
         "list-item-gap": {"pixels-above-lines": LIST_ITEM_GAP},
+        # Pulls the marker's own line back into the margin the item's
+        # text block starts at, so the bullet/number hangs to its left
+        # and wrapped lines align under the text. Applied by renderer.py
+        # to that one line only -- on the list-indent tag it would also
+        # hang the first line of a *continuation* paragraph, which has no
+        # marker to put there.
+        "list-hang": {"indent": LIST_HANGING_INDENT},
         "blockquote": {
             "left-margin": BLOCKQUOTE_INDENT,
             "foreground-rgba": _rgba(palette["dim"]),
@@ -269,13 +276,40 @@ def list_indent_tag_name(level):
     return f"list-indent-{level}"
 
 
+def list_body_tag_name(level):
+    return f"list-body-{level}"
+
+
 def ensure_list_indent_tag(tag_table, level):
-    """Lazily create (and cache in the table) the indent tag for `level`."""
+    """Lazily create (and cache in the table) a list level's two margins.
+
+    `list-indent-N` is the *marker* column, which the item's opening line
+    starts at; `list-body-N` is the *text* column one hanging indent
+    further in, where the item's wrapped lines land and where its
+    continuation blocks belong.
+
+    Both margins are absolute rather than per-level increments, because
+    `left-margin` doesn't accumulate: a nested item carries every
+    ancestor's tag too, and GTK takes the value from the
+    highest-priority tag that sets it. Priority is insertion order, so
+    the pair is created together, body after indent -- which makes body
+    beat its own level's marker column, and any deeper level (reachable
+    only through this one) beat both.
+    """
     name = list_indent_tag_name(level)
-    return get_or_create_tag(tag_table, name, {
-        "left-margin": LIST_INDENT_STEP * (level + 1),
-        "indent": LIST_HANGING_INDENT,
-    })
+    if tag_table.lookup(name) is None:
+        marker_column = LIST_INDENT_STEP * (level + 1)
+        get_or_create_tag(tag_table, name, {"left-margin": marker_column})
+        get_or_create_tag(tag_table, list_body_tag_name(level), {
+            "left-margin": marker_column - LIST_HANGING_INDENT,
+        })
+    return tag_table.lookup(name)
+
+
+def ensure_list_body_tag(tag_table, level):
+    """The text-column tag for `level` (see ensure_list_indent_tag)."""
+    ensure_list_indent_tag(tag_table, level)
+    return tag_table.lookup(list_body_tag_name(level))
 
 
 def ensure_instance_tag(tag_table, name):

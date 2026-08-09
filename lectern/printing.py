@@ -76,18 +76,60 @@ def _rounded_rect(cr, x, y, width, height, radius):
 
 
 def _left_margin_pt(block_tags):
-    margin = 0.0
-    for name in block_tags:
-        if name == "blockquote":
-            margin += tagdefs.BLOCKQUOTE_INDENT
-        elif name.startswith("list-indent-"):
-            level = int(name.rsplit("-", 1)[1])
-            margin += tagdefs.LIST_INDENT_STEP * (level + 1)
-    return margin
+    """The left margin these block tags produce on screen, so print puts
+    the block in the same place.
+
+    Not a sum: `left-margin` is a plain Gtk.TextTag property, so when
+    several applied tags set it GTK takes the highest-priority one rather
+    than adding them up -- and the list-indent tags are created lazily,
+    innermost last, which makes the innermost one win. Their margins are
+    already absolute (LIST_INDENT_STEP * (level + 1)), so that is the
+    whole indent, and a blockquote nested in a list contributes nothing
+    on top of it.
+    """
+    columns = [
+        tagdefs.LIST_INDENT_STEP * (int(name.rsplit("-", 1)[1]) + 1)
+        # A "list-body-" tag is the same level's text column, one hanging
+        # indent further in than its marker column.
+        - (tagdefs.LIST_HANGING_INDENT if name.startswith("list-body-") else 0)
+        for name in block_tags
+        if name.startswith("list-indent-") or name.startswith("list-body-")
+    ]
+    if columns:
+        return float(max(columns))
+    return float(tagdefs.BLOCKQUOTE_INDENT) if "blockquote" in block_tags else 0.0
+
+
+_MARKER_TAGS = frozenset({"list-marker", "task-checked-glyph", "task-unchecked-glyph"})
+
+
+def _marker_hang_pt(item):
+    """The hanging indent for a list item's opening line: it starts at the
+    marker column, and every line after it at the text column one
+    LIST_HANGING_INDENT further in. Zero for anything that isn't a
+    marker line -- including the item's own continuation blocks, which
+    are already placed on the text column by _left_margin_pt.
+
+    Pango.Layout's indent means the same thing as Gtk.TextTag's (negative
+    indents the lines *after* the first, which is how both spell "hang"),
+    so screen and paper stay in step through one shared constant.
+    """
+    if not any(name.startswith("list-indent-") for name in item.block_tags):
+        return 0.0
+    if not item.runs or not _MARKER_TAGS.intersection(item.runs[0][1]):
+        return 0.0
+    return float(-tagdefs.LIST_HANGING_INDENT)
 
 
 def _line_geometry(layout):
-    """[(Pango.LayoutLine, y_top_pt, height_pt, baseline_pt), ...]."""
+    """[(Pango.LayoutLine, y_top_pt, height_pt, baseline_pt, x_off_pt), ...].
+
+    x_off is the line's own horizontal offset inside the layout, which is
+    where a hanging indent lives. Pages are drawn a line at a time
+    (show_layout_line, so a block can be split across a page break), and
+    that draws wherever the caller puts the pen -- every offset Pango
+    computed for the line is lost unless it travels with it.
+    """
     result = []
     it = layout.get_iter()
     while True:
@@ -96,17 +138,20 @@ def _line_geometry(layout):
         y_top = Pango.units_to_double(logical.y)
         height = Pango.units_to_double(logical.height)
         baseline = Pango.units_to_double(it.get_baseline())
-        result.append((line, y_top, height, baseline))
+        x_off = Pango.units_to_double(logical.x)
+        result.append((line, y_top, height, baseline, x_off))
         if not it.next_line():
             break
     return result
 
 
-def _build_text_layout(context, style_table, item, width_pt):
+def _build_text_layout(context, style_table, item, width_pt, hanging_pt=0.0):
     combined = "".join(text for text, _tags in item.runs) or " "
     layout = context.create_pango_layout()
     layout.set_width(Pango.units_from_double(max(width_pt, 1.0)))
     layout.set_wrap(Pango.WrapMode.WORD_CHAR)
+    if hanging_pt:
+        layout.set_indent(Pango.units_from_double(-hanging_pt))
     # Matches the "prose" tag's pixels-inside-wrap on screen (tags.py) --
     # Pango.Layout has no per-run equivalent, so it's set once here at
     # the whole-layout level instead. Harmless on the rare print code
@@ -287,7 +332,9 @@ def _build_blocks(context, style_table, print_model, page_width, page_height, da
                 blocks.append(_Block.text(x, layout))
         elif item.kind == "paragraph":
             x = _left_margin_pt(item.block_tags)
-            layout = _build_text_layout(context, style_table, item, page_width - x)
+            layout = _build_text_layout(
+                context, style_table, item, page_width - x, _marker_hang_pt(item)
+            )
             run_tags = {tag for _text, tags in item.runs for tag in tags}
             rule = heading_rule_rgb if run_tags & {"heading1", "heading2"} else None
             blocks.append(_Block.text(x, layout, rule=rule))
@@ -401,7 +448,7 @@ def _paginate(blocks, page_height):
                 chunk_top = lines[li][1]
                 chunk = []
                 while li < len(lines):
-                    _line, y_top, height, _baseline = lines[li]
+                    _line, y_top, height, _baseline, _x_off = lines[li]
                     if (y_top - chunk_top) + height > remaining and chunk:
                         break
                     chunk.append(lines[li])
@@ -495,8 +542,8 @@ def _draw_entry(cr, entry, page_width):
             cr.set_source_rgb(*panel["fill_rgb"])
             cr.fill()
             cr.restore()
-        for line, _y_top, _height, baseline in entry["lines"]:
-            cr.move_to(entry["x"], entry["y"] + (baseline - entry["origin_baseline"]))
+        for line, _y_top, _height, baseline, x_off in entry["lines"]:
+            cr.move_to(entry["x"] + x_off, entry["y"] + (baseline - entry["origin_baseline"]))
             PangoCairo.show_layout_line(cr, line)
         if entry["rule"] is not None:
             rule_y = entry["top"] + entry["height"] + HEADING_RULE_PAD_PT
