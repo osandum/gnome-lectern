@@ -34,8 +34,18 @@ def _task_checkbox_state(html_inline_content):
     return "checked" in html_inline_content
 
 
+def _without_trailing_newline(runs):
+    """A copy of `runs` with one trailing "\\n" removed from the last run
+    (dropping that run entirely if nothing else is left)."""
+    if not runs or not runs[-1][0].endswith("\n"):
+        return list(runs)
+    text, tags = runs[-1]
+    trimmed = text[:-1]
+    return list(runs[:-1]) + ([(trimmed, tags)] if trimmed else [])
+
+
 class PrintItem:
-    __slots__ = ("kind", "runs", "block_tags", "rows", "language", "image")
+    __slots__ = ("kind", "runs", "block_tags", "rows", "language", "image", "gap")
 
     def __init__(self, kind, runs=None, block_tags=None, rows=None, language=None, image=None):
         self.kind = kind
@@ -43,6 +53,13 @@ class PrintItem:
         self.block_tags = block_tags or []
         self.rows = rows
         self.language = language
+        # Space above this block, in the same screen pixels the buffer's
+        # block-gap tags use, filled in by the walker once the collapsed
+        # margin is known. Printing scales it to points rather than
+        # inventing a spacing model of its own -- that is what used to
+        # make printed lists and headings space differently from the
+        # screen.
+        self.gap = 0
         # For "image": the live images.ImageView. Printing reads its
         # texture at print time rather than at render time, so an image
         # the reader loaded after opening the document still prints.
@@ -77,6 +94,18 @@ class MarkdownRenderer:
         "hr": 24,
         "footnote_block": 16,
     }
+    # Padding, not margin: room a block needs for chrome painted *outside*
+    # its own text box -- decorated_textview.py's fenced-code panel. It is
+    # added to the neighbouring gap rather than collapsed into it, because
+    # a collapsed margin would put the neighbour's text where the panel is
+    # about to be drawn. Kept out of the code-block tag's own
+    # pixels-above/below-lines deliberately: those apply to *every* line
+    # of the fence, not just its first and last.
+    _BLOCK_PADDING = {"fence": tagdefs.CODE_BLOCK_PADDING}
+    # Blocks that only ever contain other blocks. Their last child already
+    # recorded whatever trailing padding is owed, so re-deriving it from
+    # the container's own type would throw that away.
+    _CONTAINER_BLOCKS = {"bullet_list", "ordered_list", "blockquote", "footnote_block"}
 
     def __init__(self):
         self.tag_table = None
@@ -100,6 +129,7 @@ class MarkdownRenderer:
         self._pending_anchors = []      # (anchor, widget) drained by caller
         self._instance_counter = 0
         self._prev_block_bottom = None
+        self._prev_block_padding = 0
         self._link_color = tagdefs.link_color_hex(dark=False)  # overwritten by render()
         self._base_dir = None                                  # ditto
 
@@ -108,6 +138,7 @@ class MarkdownRenderer:
     def render(self, tree, buffer, dark=False, base_dir=None):
         self.tag_table = buffer.get_tag_table()
         self._prev_block_bottom = None
+        self._prev_block_padding = 0
         self._link_color = tagdefs.link_color_hex(dark)
         # Directory the document lives in, for resolving relative image
         # paths -- the same base window.py resolves relative links against.
@@ -180,16 +211,24 @@ class MarkdownRenderer:
 
     def _walk_block_node(self, child, buffer, it, ctx):
         """Dispatch one block and apply collapsed-style inter-block spacing.
-        Gap before B is max(bottom(A), top(B)), then becomes B's bottom for
-        the next block.
+        Gap before B is max(bottom(A), top(B)) -- plus any padding either
+        side needs for chrome drawn outside its text box, which doesn't
+        collapse (see _BLOCK_PADDING). bottom(B) then carries to the next
+        block.
         """
         t = child.type
+        prev_padding = self._prev_block_padding
         start_mark = buffer.create_mark(None, it, True) if self._prev_block_bottom is not None else None
+        first_item = len(self.print_model)
         self._dispatch_block_node(t, child, buffer, it, ctx)
         if start_mark is not None:
             gap = max(self._prev_block_bottom, self._BLOCK_TOP_MARGIN.get(t, 0))
+            gap += prev_padding + self._BLOCK_PADDING.get(t, 0)
             self._apply_gap(buffer, start_mark, gap)
+            self._record_print_gap(first_item, gap)
         self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN.get(t, 0)
+        if t not in self._CONTAINER_BLOCKS:
+            self._prev_block_padding = self._BLOCK_PADDING.get(t, 0)
 
     def _dispatch_block_node(self, t, child, buffer, it, ctx):
         if t == "heading":
@@ -212,20 +251,36 @@ class MarkdownRenderer:
         # Anything else (raw html_block, etc.) is silently skipped -- v1
         # scope cut, not requested.
 
+    def _record_print_gap(self, first_item, gap):
+        """Give the print item a block's spacing wound up on -- the first
+        one it emitted, matching the buffer line the gap tag went on. A
+        block that emitted nothing to print (an empty table) has none."""
+        if first_item < len(self.print_model):
+            self.print_model[first_item].gap = gap
+
     @staticmethod
-    def _apply_gap(buffer, start_mark, gap):
-        """Apply top spacing to just the first buffer line at `start_mark`."""
+    def _tag_first_line(buffer, start_mark, tag_name, delete_mark=True):
+        """Apply a paragraph-level tag to just the first buffer line at
+        `start_mark` -- the only way to give a block's opening line
+        spacing or an indent of its own, since Gtk.TextTag properties like
+        pixels-above-lines and indent apply to every line they cover."""
         start_iter = buffer.get_iter_at_mark(start_mark)
         end_iter = start_iter.copy()
         if not end_iter.ends_line():
             end_iter.forward_to_line_end()
+        buffer.apply_tag_by_name(tag_name, start_iter, end_iter)
+        if delete_mark:
+            buffer.delete_mark(start_mark)
+
+    @classmethod
+    def _apply_gap(cls, buffer, start_mark, gap):
+        """Apply top spacing to just the first buffer line at `start_mark`."""
         if isinstance(gap, str):
             tag_name = gap
         else:
             tag = tagdefs.ensure_block_gap_tag(buffer.get_tag_table(), gap)
             tag_name = tag.get_property("name")
-        buffer.apply_tag_by_name(tag_name, start_iter, end_iter)
-        buffer.delete_mark(start_mark)
+        cls._tag_first_line(buffer, start_mark, tag_name)
 
     def _emit_simple_paragraph(self, node, buffer, it, ctx, extra_tag=None):
         inline_tags = [extra_tag] if extra_tag else []
@@ -267,8 +322,13 @@ class MarkdownRenderer:
             runs.append((text, run_tags))
         if not code.endswith("\n"):
             buffer.insert(it, "\n")
+        # The buffer needs that final newline to end the block's last
+        # line; the print layout must not have it, or Pango adds an empty
+        # line whose height the code panel then pads around. Paragraphs
+        # already keep their terminator out of `runs` for the same reason.
         self.print_model.append(
-            PrintItem("code-block", runs=runs, block_tags=list(ctx.block_tags), language=language)
+            PrintItem("code-block", runs=_without_trailing_newline(runs),
+                      block_tags=list(ctx.block_tags), language=language)
         )
 
     def _emit_hr(self, buffer, it, ctx):
@@ -322,7 +382,13 @@ class MarkdownRenderer:
     # -- lists / task lists -----------------------------------------------
 
     def _walk_list(self, node, buffer, it, ctx, ordered):
-        level = sum(1 for t in ctx.block_tags if t.startswith("list-indent-"))
+        # Both names count: a list nested inside an item's continuation
+        # blocks sees its ancestor as a "list-body-" tag, and missing it
+        # would restart the nesting at level 0.
+        level = sum(
+            1 for t in ctx.block_tags
+            if t.startswith("list-indent-") or t.startswith("list-body-")
+        )
         indent_tag = tagdefs.ensure_list_indent_tag(self.tag_table, level)
         child_ctx = ctx.push_block(indent_tag.get_property("name"))
         for index, item in enumerate(node.children):
@@ -333,9 +399,15 @@ class MarkdownRenderer:
             # since items were previously packed with zero separation.
             needs_gap = index > 0
             start_mark = buffer.create_mark(None, it, True) if needs_gap else None
+            padding = self._prev_block_padding
+            first_item = len(self.print_model)
             self._walk_list_item(item, buffer, it, child_ctx, ordered)
             if start_mark is not None:
-                self._apply_gap(buffer, start_mark, "list-item-gap")
+                gap = tagdefs.LIST_ITEM_GAP + padding
+                # The padding-free case reuses the static tag rather than
+                # minting an identical block-gap-6 one per document.
+                self._apply_gap(buffer, start_mark, "list-item-gap" if not padding else gap)
+                self._record_print_gap(first_item, gap)
 
     def _walk_list_item(self, item, buffer, it, ctx, ordered):
         is_task = bool(item.attrs) and "task-list-item" in str(item.attrs.get("class", ""))
@@ -350,7 +422,26 @@ class MarkdownRenderer:
         else:
             marker_text = "•  "  # •
             marker_tag = "list-marker"
-        self._walk_block_with_marker(block_children, buffer, it, ctx, marker_text, marker_tag)
+        self._walk_block_with_marker(
+            block_children, buffer, it, ctx, marker_text, marker_tag,
+            hang=True, body_ctx=self._list_body_ctx(ctx),
+        )
+
+    def _list_body_ctx(self, ctx):
+        """`ctx` with this list level's marker column swapped for its text
+        column, for the blocks of an item that follow the one carrying the
+        marker -- they line up under the item's text, not under its
+        bullet."""
+        for i in range(len(ctx.block_tags) - 1, -1, -1):
+            name = ctx.block_tags[i]
+            if not name.startswith("list-indent-"):
+                continue
+            level = int(name.rsplit("-", 1)[1])
+            body = tagdefs.ensure_list_body_tag(self.tag_table, level)
+            tags = list(ctx.block_tags)
+            tags[i] = body.get_property("name")
+            return RenderCtx(tags)
+        return ctx
 
     def _detect_task_checked(self, block_children):
         if not block_children or block_children[0].type != "paragraph":
@@ -365,16 +456,25 @@ class MarkdownRenderer:
                     return state
         return False
 
-    def _walk_block_with_marker(self, block_children, buffer, it, ctx, marker_text, marker_tag):
+    def _walk_block_with_marker(self, block_children, buffer, it, ctx, marker_text,
+                                marker_tag, hang=False, body_ctx=None):
         """Shared by list items and footnote definitions: render `marker_text`
         immediately before the first paragraph's content (same visual line),
-        then walk any remaining block children normally."""
+        then walk any remaining block children normally.
+
+        `hang` gives that one line the hanging indent that puts the marker
+        left of the item's text (list items; footnote definitions have no
+        indent to hang out of), and `body_ctx` is the context the
+        remaining blocks are walked in -- the item's text column rather
+        than its marker column."""
+        hang_mark = buffer.create_mark(None, it, True) if hang else None
         if block_children and block_children[0].type == "paragraph":
             first, rest = block_children[0], block_children[1:]
             runs = [(marker_text, [marker_tag])]
             buffer.insert_with_tags_by_name(it, marker_text, *(ctx.block_tags + [marker_tag]))
             self._emit_paragraph_body(first, buffer, it, ctx, runs)
             self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN["paragraph"]
+            self._prev_block_padding = 0
         else:
             buffer.insert_with_tags_by_name(it, marker_text + "\n", *(ctx.block_tags + [marker_tag]))
             self.print_model.append(
@@ -382,8 +482,11 @@ class MarkdownRenderer:
             )
             rest = block_children
             self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN["paragraph"]
+            self._prev_block_padding = 0
+        if hang_mark is not None:
+            self._tag_first_line(buffer, hang_mark, "list-hang")
         for child in rest:
-            self._walk_block_node(child, buffer, it, ctx)
+            self._walk_block_node(child, buffer, it, body_ctx or ctx)
 
     # -- footnotes -------------------------------------------------------
 

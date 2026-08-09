@@ -14,6 +14,7 @@ from .findbar import FindController
 from .zoom import ZoomController
 from .filewatch import FileWatcher
 from .printing import PrintCoordinator
+from .decorated_textview import DecoratedTextView
 
 
 class LecternWindow(Adw.ApplicationWindow):
@@ -86,10 +87,11 @@ class LecternWindow(Adw.ApplicationWindow):
         # unconditionally would be pure wasted startup work for the (very
         # common) case where _render_document replaces it immediately
         # after, or the empty-state page replaces this view entirely.
-        self._textview = Gtk.TextView(
+        self._textview = DecoratedTextView(
             editable=False, cursor_visible=False,
             wrap_mode=Gtk.WrapMode.WORD_CHAR,
-            left_margin=16, right_margin=16, top_margin=16, bottom_margin=16,
+            left_margin=tagdefs.CONTENT_MARGIN, right_margin=tagdefs.CONTENT_MARGIN,
+            top_margin=tagdefs.CONTENT_MARGIN, bottom_margin=tagdefs.CONTENT_MARGIN,
         )
         self._textview.add_css_class("lectern-content")
 

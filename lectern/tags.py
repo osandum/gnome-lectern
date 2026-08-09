@@ -17,6 +17,7 @@ _LIGHT = {
     "dim": "#5e5c64",
     "link": "#1a5fb4",
     "code-bg": "#f6f5f4",
+    "heading-rule": "#d8dee4",
     "pyg-keyword": "#a51e75",
     "pyg-string": "#26a269",
     "pyg-comment": "#77767b",
@@ -32,6 +33,7 @@ _DARK = {
     "dim": "#9a9996",
     "link": "#62a0ea",
     "code-bg": "#2d2d2d",
+    "heading-rule": "#3d444d",
     "pyg-keyword": "#dc8add",
     "pyg-string": "#8ff0a4",
     "pyg-comment": "#9a9996",
@@ -53,11 +55,32 @@ _HEADING_SCALE = [2.0, 1.5, 1.25, 1.0, 0.875, 0.85]
 # "prose" tag below (see renderer.py's root RenderCtx), not per block
 # type, since it's a base body-text property everything else layers on
 # top of.
-PROSE_LINE_SPACING = 3
+PROSE_LINE_SPACING = 6
 
-# Space above every list item after a list's first, aligned to GitHub's
-# li + li = 0.25em target.
-LIST_ITEM_GAP = 4
+# Space above every list item after a list's first. Deliberately larger
+# than GitHub's li + li = 0.25em because that reads too tight in Lectern.
+LIST_ITEM_GAP = 6
+
+# The Gtk.TextView's own margin on all four sides (window.py applies it),
+# i.e. where the content column starts. Lives here because Gtk.TextTag's
+# left-margin/right-margin *replace* the view's rather than adding to it,
+# so any tag wanting an inset relative to the content column has to spell
+# out the sum itself -- see "code-block" below.
+CONTENT_MARGIN = 16
+
+# Chrome that Gtk.TextTag can't express and decorated_textview.py paints
+# by hand (see that module's docstring). Kept here next to the tag
+# definitions they have to stay in step with: CODE_BLOCK_PADDING is also
+# what renderer.py's fence block margins reserve room for, and
+# HEADING_RULE_PAD is what heading1/heading2's pixels-below-lines below
+# reserves. GitHub's values, in px at a 16px base.
+CODE_BLOCK_PADDING = 16
+CODE_BLOCK_RADIUS = 6
+INLINE_CODE_PAD_X = 4
+INLINE_CODE_PAD_Y = 2
+INLINE_CODE_RADIUS = 4
+HEADING_RULE_PAD = 6
+HEADING_RULE_WIDTH = 1
 
 # Indent step, in pixels, per nesting level of list content (~2em).
 LIST_INDENT_STEP = 30
@@ -89,6 +112,10 @@ def link_color_hex(dark):
     minor known limitation rather than building live-recolor plumbing
     for it."""
     return (_DARK if dark else _LIGHT)["link"]
+
+
+def heading_rule_rgba(dark):
+    return _rgba((_DARK if dark else _LIGHT)["heading-rule"])
 
 
 @functools.lru_cache(maxsize=2)
@@ -125,16 +152,29 @@ def tag_style_props(dark):
             "scale": 0.92,
             "background-rgba": _rgba(palette["code-bg"]),
         },
+        # Inset one CODE_BLOCK_PADDING *inside* the content column, so the
+        # panel decorated_textview.py paints behind it can span the column
+        # edge-to-edge with even padding on all four sides. The vertical
+        # half of that padding is reserved by renderer.py's fence block
+        # margins instead -- pixels-above/below-lines here would apply to
+        # every line of the block, not just its first and last.
         "code-block": {
             "family": "monospace",
             "scale": 0.92,
-            "left-margin": 16,
-            "right-margin": 16,
+            "left-margin": CONTENT_MARGIN + CODE_BLOCK_PADDING,
+            "right-margin": CONTENT_MARGIN + CODE_BLOCK_PADDING,
             "wrap-mode": Gtk.WrapMode.NONE,
         },
         # Renderer-created dynamic block-gap-* tags carry the actual
         # inter-block top spacing value.
         "list-item-gap": {"pixels-above-lines": LIST_ITEM_GAP},
+        # Pulls the marker's own line back into the margin the item's
+        # text block starts at, so the bullet/number hangs to its left
+        # and wrapped lines align under the text. Applied by renderer.py
+        # to that one line only -- on the list-indent tag it would also
+        # hang the first line of a *continuation* paragraph, which has no
+        # marker to put there.
+        "list-hang": {"indent": LIST_HANGING_INDENT},
         "blockquote": {
             "left-margin": BLOCKQUOTE_INDENT,
             "foreground-rgba": _rgba(palette["dim"]),
@@ -172,6 +212,11 @@ def tag_style_props(dark):
             "weight": Pango.Weight.BOLD,
             "scale": _HEADING_SCALE[i],
         }
+    # h1/h2 carry a bottom rule that decorated_textview.py draws
+    # HEADING_RULE_PAD below the text; reserve that much plus the stroke
+    # so the rule sits in space of its own rather than on the next block.
+    for name in ("heading1", "heading2"):
+        props[name]["pixels-below-lines"] = HEADING_RULE_PAD + HEADING_RULE_WIDTH
     for name in PYGMENTS_TAG_NAMES:
         props[name] = {"foreground-rgba": _rgba(palette[name])}
     return props
@@ -231,13 +276,40 @@ def list_indent_tag_name(level):
     return f"list-indent-{level}"
 
 
+def list_body_tag_name(level):
+    return f"list-body-{level}"
+
+
 def ensure_list_indent_tag(tag_table, level):
-    """Lazily create (and cache in the table) the indent tag for `level`."""
+    """Lazily create (and cache in the table) a list level's two margins.
+
+    `list-indent-N` is the *marker* column, which the item's opening line
+    starts at; `list-body-N` is the *text* column one hanging indent
+    further in, where the item's wrapped lines land and where its
+    continuation blocks belong.
+
+    Both margins are absolute rather than per-level increments, because
+    `left-margin` doesn't accumulate: a nested item carries every
+    ancestor's tag too, and GTK takes the value from the
+    highest-priority tag that sets it. Priority is insertion order, so
+    the pair is created together, body after indent -- which makes body
+    beat its own level's marker column, and any deeper level (reachable
+    only through this one) beat both.
+    """
     name = list_indent_tag_name(level)
-    return get_or_create_tag(tag_table, name, {
-        "left-margin": LIST_INDENT_STEP * (level + 1),
-        "indent": LIST_HANGING_INDENT,
-    })
+    if tag_table.lookup(name) is None:
+        marker_column = LIST_INDENT_STEP * (level + 1)
+        get_or_create_tag(tag_table, name, {"left-margin": marker_column})
+        get_or_create_tag(tag_table, list_body_tag_name(level), {
+            "left-margin": marker_column - LIST_HANGING_INDENT,
+        })
+    return tag_table.lookup(name)
+
+
+def ensure_list_body_tag(tag_table, level):
+    """The text-column tag for `level` (see ensure_list_indent_tag)."""
+    ensure_list_indent_tag(tag_table, level)
+    return tag_table.lookup(list_body_tag_name(level))
 
 
 def ensure_instance_tag(tag_table, name):
