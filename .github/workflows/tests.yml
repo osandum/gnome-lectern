@@ -52,13 +52,23 @@ jobs:
             print('GTK', Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version()); \
             print('Adw', Adw.get_major_version(), Adw.get_minor_version())"
 
-      # xvfb is required, despite the tests never showing a window:
-      # constructing a Gtk.Grid segfaults outright with no display. Note
-      # that unsetting DISPLAY/WAYLAND_DISPLAY on a desktop does NOT
-      # reproduce this -- GDK falls back to the default "wayland-0"
-      # socket in XDG_RUNTIME_DIR and connects anyway, which is what made
-      # this look headless locally.
+      # xvfb is required: constructing a Gtk.Grid segfaults outright with
+      # no display. Note that unsetting DISPLAY/WAYLAND_DISPLAY on a
+      # desktop does NOT reproduce this -- GDK falls back to the default
+      # "wayland-0" socket in XDG_RUNTIME_DIR and connects anyway, which
+      # is what made this look headless locally.
+      #
+      # GSK_RENDERER=cairo because test_layout.py presents a real window
+      # (the only way a CSS font-size reaches a TextView's layout), and
+      # the default GL renderer *aborts the process* when libGLESv2 is
+      # absent, as it is here -- SIGABRT, not an exception. The
+      # alternative is installing mesa-libGLES + mesa-dri-drivers, which
+      # is a lot of GL to carry for tests that never draw. tests/conftest.py
+      # sets the same default, so this is belt and braces -- but it is set
+      # here too so the reason is visible at the point of failure.
       - name: Run tests
+        env:
+          GSK_RENDERER: cairo
         run: xvfb-run -a .venv/bin/python -m pytest -q
 
   fedora:
@@ -92,6 +102,8 @@ jobs:
             print('GTK', Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version()); \
             print('Adw', Adw.get_major_version(), Adw.get_minor_version())"
 
-      # xvfb here too; see the Ubuntu job for why.
+      # xvfb and GSK_RENDERER here too; see the Ubuntu job for why.
       - name: Run tests
+        env:
+          GSK_RENDERER: cairo
         run: xvfb-run -a .venv/bin/python -m pytest -q
