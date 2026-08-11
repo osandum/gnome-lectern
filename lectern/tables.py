@@ -250,9 +250,22 @@ def build_table_widget(table_node, link_color):
         cell_row = []
         for col_index, cell_node in enumerate(cells):
             label = Gtk.Label(
-                xalign=0.0, wrap=True, hexpand=True,
+                xalign=0.0, wrap=True, hexpand=True, selectable=True,
                 margin_top=6, margin_bottom=6, margin_start=8, margin_end=8,
             )
+            # Table text lives in these labels, not in the TextBuffer, so
+            # the TextView's own click-drag selection can't reach it --
+            # without `selectable` a drag inside a cell selects nothing at
+            # all. Selection is per-label (GTK has no way to carry one
+            # selection across sibling widgets), so a drag covers a single
+            # cell, and Ctrl+C copies it because GtkLabel binds that itself.
+            #
+            # That binding is why the focusability `selectable` turns on is
+            # left alone, even though it puts every cell in the Tab chain:
+            # a label with can-focus or focusable cleared refuses
+            # grab_focus() outright (measured, GTK 4.18), so the click that
+            # starts a selection can't move the keyboard focus onto it and
+            # Ctrl+C keeps going to whatever still holds focus.
             # Caps this label's *natural* width to roughly its column's
             # typical content length, instead of the unwrapped full-text
             # width every column got before -- GtkGrid then sizes each

@@ -267,6 +267,20 @@ def test_table_cell_link_is_clickable():
     assert "../app/foo/" in markup
 
 
+def test_table_cells_are_selectable():
+    # Regression test: cell text lives in Gtk.Labels, which the TextView's
+    # own click-drag selection can't reach, so a drag inside a cell
+    # selected nothing at all until the labels were made selectable.
+    # Selectable also implies focusable, which is what routes Ctrl+C to
+    # the cell holding the selection -- clearing either kills the copy.
+    renderer, _buffer = render("| A | B |\n|---|---|\n| 1 | 2 |\n")
+    _anchor, cells = renderer.tables[0]
+    labels = [cell.label for row in cells for cell in row]
+    assert len(labels) == 4
+    assert all(label.get_selectable() for label in labels)
+    assert all(label.get_focusable() for label in labels)
+
+
 def test_footnote_ref_and_definition_roundtrip():
     renderer, buffer = render("claim.[^1]\n\n[^1]: the definition.\n")
     text = buffer_text(buffer)
