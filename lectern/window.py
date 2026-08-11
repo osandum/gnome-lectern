@@ -122,6 +122,7 @@ class LecternWindow(Adw.ApplicationWindow):
         # sized tables immediately, not just after the first resize.
         self._fill_width_widgets = []
         self._images = []
+        self._diagrams = []
         self._textview.get_hadjustment().connect("notify::page-size", self._on_content_width_changed)
 
         self._zoom = ZoomController(self._textview)
@@ -349,19 +350,26 @@ class LecternWindow(Adw.ApplicationWindow):
             return  # not yet laid out
         for widget in self._fill_width_widgets:
             widget.set_size_request(round(usable), -1)
-        # Images take the same number as a ceiling to scale down to,
-        # rather than a width to fill -- see ImageView._apply_size.
-        for image in self._images:
-            image.set_available_width(round(usable))
+        # Images and diagrams take the same number as a ceiling to scale
+        # down to, rather than a width to fill -- see
+        # ImageView._apply_size and DiagramView.set_available_width.
+        for scaled in self._images + self._diagrams:
+            scaled.set_available_width(round(usable))
 
     # -- zoom ------------------------------------------------------------
 
     def _on_zoom_changed(self, controller, factor):
         self._zoom_label.set_text(f"{round(factor * 100)}%")
+        # Diagrams are drawn, not laid out by the TextView, so the CSS
+        # font-size the controller sets doesn't reach them -- they're
+        # scaled by hand to keep step with the text around them.
+        for diagram in self._diagrams:
+            diagram.set_zoom(factor)
         # Zooming moves the view's margins without the viewport changing
         # size, so the page-size signal the width sync rides on never
         # fires -- anchored tables and separators would otherwise keep the
-        # previous zoom's width until the next window resize.
+        # previous zoom's width until the next window resize. Diagrams are
+        # width-synced there too, so this has to follow their set_zoom.
         self._sync_fill_width_widgets()
         self._flash_zoom_osd()
 
@@ -526,6 +534,9 @@ class LecternWindow(Adw.ApplicationWindow):
         self._renderer.render(self._document.tree, buffer, dark=dark, base_dir=base_dir)
         self._textview.set_buffer(buffer)
         self._images = self._renderer.images
+        self._diagrams = self._renderer.diagrams
+        for diagram in self._diagrams:
+            diagram.set_zoom(self._zoom.factor)
         self._fill_width_widgets = self._renderer.attach_pending_widgets(self._textview)
         self._sync_fill_width_widgets()
         self._sync_remote_images_banner()

@@ -360,6 +360,10 @@ class _Block:
         self.rows = None
         self.col_widths = None
         self.pixbuf = None
+        self.scene = None
+        self.scale = 1.0
+        self.palette = None
+        self.font = None
         self.draw_size = None
         self.height = 0.0
         # Space above this block, carried over from the renderer's own
@@ -402,6 +406,20 @@ class _Block:
         return block
 
     @classmethod
+    def diagram(cls, x, scene, scale, palette, font):
+        block = cls("diagram", x)
+        block.scene = scene
+        block.scale = scale
+        block.palette = palette
+        # The scene's text is re-laid-out at draw time, so the font it was
+        # measured with has to survive until then -- a different one would
+        # put every string somewhere other than the box built for it.
+        block.font = font
+        block.draw_size = (pt(scene.width) * scale, pt(scene.height) * scale)
+        block.height = block.draw_size[1]
+        return block
+
+    @classmethod
     def table(cls, x, row_layouts, row_heights, col_widths):
         block = cls("table", x)
         block.rows = (row_layouts, row_heights)
@@ -439,6 +457,36 @@ def _image_draw_size(pixbuf, max_width_pt, max_height_pt):
     return natural_w * scale, natural_h * scale
 
 
+def _diagram_block(item, x, page_width, page_height, font, palette):
+    """One mermaid diagram, laid out for paper. None if it can't be.
+
+    The scene is built here rather than reused from the screen because a
+    scene is only valid for the font it was measured against, and paper
+    doesn't always print in the screen's font (see _base_font). Laying it
+    out again from the parsed model costs a few milliseconds per diagram
+    and keeps every box the right size around its text.
+    """
+    from . import mermaid
+    try:
+        scene = mermaid.build_scene(item.diagram, font)
+    except Exception:
+        # Same reasoning as renderer._emit_diagram: a diagram that trips
+        # over a layout bug must not take the print job down with it.
+        return None
+    natural_w, natural_h = pt(scene.width), pt(scene.height)
+    if natural_w <= 0 or natural_h <= 0:
+        return None
+    scale = min(1.0,
+                (page_width - x) / natural_w,
+                page_height * IMAGE_MAX_PAGE_FRACTION / natural_h)
+    return _Block.diagram(x, scene, scale, palette, font)
+
+
+def _draw_diagram_scene(cr, scene, palette, font):
+    from . import mermaid
+    mermaid.draw.draw_scene(cr, scene, palette, font)
+
+
 def _build_blocks(context, style_table, print_model, page_width, page_height, dark):
     blocks = []
     # One description for the whole job rather than a Gtk.Settings lookup
@@ -468,6 +516,18 @@ def _build_blocks(context, style_table, print_model, page_width, page_height, da
                 layout = _build_text_layout(
                     context, style_table, _AltTextItem(alt, item.block_tags),
                     page_width - x, font=font, leading_pt=leading,
+                )
+                blocks.append(_Block.text(x, layout))
+        elif item.kind == "diagram":
+            x = _left_margin_pt(item.block_tags)
+            block = _diagram_block(
+                item, x, page_width, page_height, font, tagdefs.diagram_palette(dark))
+            if block is not None:
+                blocks.append(block)
+            else:
+                layout = _build_text_layout(
+                    context, style_table, _AltTextItem("diagram", item.block_tags),
+                    page_width - x, font=font,
                 )
                 blocks.append(_Block.text(x, layout))
         elif item.kind == "paragraph":
@@ -551,6 +611,19 @@ def _paginate(blocks, page_height):
             current.append({
                 "type": "image", "x": block.x, "y": y + gap,
                 "pixbuf": block.pixbuf, "size": block.draw_size,
+            })
+            y += gap + block.height
+        elif block.kind == "diagram":
+            # Atomic like an image: _diagram_block already scaled it to
+            # fit one page, and a diagram sliced in half is unreadable in
+            # a way a paragraph is not.
+            if y + gap + block.height > page_height and current:
+                new_page()
+                gap = 0.0
+            current.append({
+                "type": "diagram", "x": block.x, "y": y + gap,
+                "scene": block.scene, "scale": block.scale,
+                "palette": block.palette, "font": block.font,
             })
             y += gap + block.height
         elif block.kind == "table":
@@ -718,6 +791,16 @@ def _draw_entry(cr, entry, page_width):
         cr.scale(width / pixbuf.get_width(), height / pixbuf.get_height())
         Gdk.cairo_set_source_pixbuf(cr, pixbuf, 0, 0)
         cr.paint()
+        cr.restore()
+    elif entry["type"] == "diagram":
+        cr.save()
+        cr.translate(entry["x"], entry["y"])
+        # The scene is in nominal 96dpi pixels and the printer's context
+        # is in points, so one scale here puts every length in the scene
+        # -- geometry, stroke widths and the absolute font sizes its text
+        # is laid out at -- on paper at the proportions it has on screen.
+        cr.scale(PX_TO_PT * entry["scale"], PX_TO_PT * entry["scale"])
+        _draw_diagram_scene(cr, entry["scene"], entry["palette"], entry["font"])
         cr.restore()
     elif entry["type"] == "layout":
         panel = entry["panel"]

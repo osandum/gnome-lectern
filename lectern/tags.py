@@ -27,6 +27,16 @@ _LIGHT = {
     "pyg-class": "#9a5b00",
     "pyg-operator": "#5e5c64",
     "pyg-decorator": "#813d9c",
+    # Mermaid diagrams (mermaid/draw.py). Cooler and flatter than
+    # mermaid's own lilac default so a diagram reads as part of an
+    # Adwaita document rather than an embedded screenshot of a web page.
+    "diagram-node": "#e8f0fb",
+    "diagram-node-alt": "#d7e3f4",
+    "diagram-cluster": "#f2f3f5",
+    "diagram-edge": "#5c7799",
+    "diagram-fg": "#1b1f24",
+    "diagram-label-bg": "#fafafa",
+    "diagram-note": "#fbf5d6",
 }
 
 _DARK = {
@@ -43,6 +53,13 @@ _DARK = {
     "pyg-class": "#f8e45c",
     "pyg-operator": "#c0bfbc",
     "pyg-decorator": "#dc8add",
+    "diagram-node": "#2b3746",
+    "diagram-node-alt": "#35455a",
+    "diagram-cluster": "#282b30",
+    "diagram-edge": "#8cb2dc",
+    "diagram-fg": "#f6f5f4",
+    "diagram-label-bg": "#242424",
+    "diagram-note": "#3b3722",
 }
 
 # Heading scales, largest first (heading1 == h1), aligned to GitHub's
@@ -157,6 +174,33 @@ def link_color_hex(dark):
 
 def heading_rule_rgba(dark):
     return _rgba((_DARK if dark else _LIGHT)["heading-rule"])
+
+
+# Scene role (mermaid/scene.py) -> palette key. The roles are named for
+# what they mean in a diagram; this is the one place that says what colour
+# each of them takes, for the same reason the tag table above is: the
+# on-screen widget and the print job both read it, so a diagram can't be
+# one colour on screen and another on paper.
+_DIAGRAM_ROLE_COLORS = {
+    "node": "diagram-node",
+    "node-alt": "diagram-node-alt",
+    "cluster": "diagram-cluster",
+    "edge": "diagram-edge",
+    "fg": "diagram-fg",
+    "dim": "dim",
+    "label-bg": "diagram-label-bg",
+    "note": "diagram-note",
+}
+
+
+def diagram_palette(dark):
+    """Role -> (r, g, b) floats, ready for cairo."""
+    palette = _DARK if dark else _LIGHT
+    colors = {}
+    for role, key in _DIAGRAM_ROLE_COLORS.items():
+        rgba = _rgba(palette[key])
+        colors[role] = (rgba.red, rgba.green, rgba.blue)
+    return colors
 
 
 @functools.lru_cache(maxsize=2)
