@@ -23,15 +23,20 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Pango", "1.0")
 from gi.repository import Gtk, Pango
 
+from . import entities
 from . import flowchart
+from . import sequence
 from . import text as textlib
-from .flowchart import Unsupported
+from .common import Unsupported
 from .view import DiagramView
 
 # First word of the source -> the module that parses that diagram type.
 _PARSERS = {
     "flowchart": flowchart.parse,
     "graph": flowchart.parse,
+    "sequencediagram": sequence.parse,
+    "classdiagram": entities.parse_class,
+    "erdiagram": entities.parse_er,
 }
 
 SUPPORTED_TYPES = tuple(sorted(_PARSERS))
@@ -42,7 +47,10 @@ def _first_word(source):
         line = raw_line.strip()
         if not line or line.startswith("%%"):
             continue
-        return line.split()[0].rstrip(";").lower()
+        # "classDiagram-v2" is the same diagram as "classDiagram"; the
+        # suffix is a mermaid renderer version, not a type.
+        word = line.split()[0].rstrip(";").lower()
+        return word[:-3] if word.endswith("-v2") else word
     return ""
 
 

@@ -140,7 +140,7 @@ def test_comments_and_presentational_statements_are_ignored():
 
 @pytest.mark.parametrize("source", [
     "gantt\n  title Nope\n",                       # a type we don't draw
-    "sequenceDiagram\n  A ->> B: hi\n",            # ditto
+    "stateDiagram-v2\n  [*] --> Still\n",          # ditto
     "flowchart TD\n  subgraph one\n  A\n  end\n",  # a construct we don't draw
     "flowchart TD\n  A --> B & C\n",
     "flowchart XY\n  A --> B\n",                   # unknown direction
@@ -240,6 +240,221 @@ def test_edge_label_is_drawn_on_a_plate():
     assert plate.x <= label.x and plate.y <= label.y
     assert plate.x + plate.w >= label.x + label.w
     assert plate.y + plate.h >= label.y + label.h
+
+
+# -- sequence diagrams -----------------------------------------------------
+
+SEQUENCE = """sequenceDiagram
+    participant W as Window
+    participant D as Document
+    W->>D: load()
+    activate D
+    D-->>W: tree
+    deactivate D
+    Note over W,D: reload watches the file
+    loop every save
+        W->>W: re-render
+    end
+"""
+
+
+def test_sequence_participants_keep_declaration_order_and_labels():
+    diagram = mermaid.parse(SEQUENCE)
+    assert list(diagram.participants) == ["W", "D"]
+    assert diagram.participants["W"].label == "Window"
+
+
+def test_sequence_participant_is_declared_by_first_use():
+    diagram = mermaid.parse("sequenceDiagram\n  A->>B: hi\n")
+    assert list(diagram.participants) == ["A", "B"]
+    assert diagram.participants["A"].label == "A"
+
+
+@pytest.mark.parametrize("arrow, dotted, head", [
+    ("->", False, None),
+    ("-->", True, None),
+    ("->>", False, "arrow"),
+    ("-->>", True, "arrow"),
+    ("-x", False, "cross"),
+    ("--x", True, "cross"),
+    ("-)", False, "open"),
+    ("--)", True, "open"),
+])
+def test_sequence_arrow_forms(arrow, dotted, head):
+    diagram = mermaid.parse(f"sequenceDiagram\n  A{arrow}B: hi\n")
+    message = diagram.events[0]
+    assert (message.dotted, message.head, message.text) == (dotted, head, "hi")
+
+
+def test_sequence_activation_shorthand_is_an_activation():
+    diagram = mermaid.parse("sequenceDiagram\n  A->>+B: go\n  B-->>-A: done\n")
+    assert [event.activation for event in diagram.events] == ["+", "-"]
+
+
+def test_sequence_blocks_must_be_closed():
+    with pytest.raises(mermaid.Unsupported):
+        mermaid.parse("sequenceDiagram\n  loop forever\n    A->>B: hi\n")
+    with pytest.raises(mermaid.Unsupported):
+        mermaid.parse("sequenceDiagram\n  A->>B: hi\n  end\n")
+
+
+def test_sequence_scene_has_two_boxes_per_participant():
+    # Participants are repeated at the foot of the diagram, which is what
+    # keeps a tall one readable without scrolling back to the top.
+    scene = build(SEQUENCE)
+    labels = [shape.text for shape in scene.shapes if isinstance(shape, sc.Text)]
+    assert labels.count("Window") == 2
+    assert labels.count("Document") == 2
+
+
+def test_sequence_rows_run_down_the_page_in_source_order():
+    scene = build(SEQUENCE)
+    lines = [shape for shape in scene.shapes if isinstance(shape, sc.Line) and not shape.dashed]
+    # The solid message lines (load(), and the self-call's box) come in
+    # the order they were written.
+    assert lines == sorted(lines, key=lambda line: min(y for _x, y in line.points))
+
+
+def test_sequence_lifelines_span_between_the_two_boxes():
+    scene = build("sequenceDiagram\n  A->>B: hi\n")
+    dashed = [shape for shape in scene.shapes
+              if isinstance(shape, sc.Line) and shape.dashed]
+    assert len(dashed) == 2                       # one lifeline per participant
+    for line in dashed:
+        (x0, y0), (x1, y1) = line.points
+        assert x0 == x1                           # vertical
+        assert y1 > y0
+
+
+def test_sequence_note_over_two_participants_spans_them():
+    scene = build("sequenceDiagram\n  A->>B: hi\n  Note over A,B: shared\n")
+    note = next(s for s in scene.shapes if isinstance(s, sc.Rect) and s.fill == sc.NOTE)
+    label = next(s for s in scene.shapes if isinstance(s, sc.Text) and s.text == "shared")
+    assert note.x <= label.x and note.x + note.w >= label.x + label.w
+
+
+def test_sequence_frame_encloses_the_rows_inside_it():
+    scene = build(SEQUENCE)
+    frame = next(s for s in scene.shapes
+                 if isinstance(s, sc.Rect) and s.dashed and s.stroke == sc.EDGE)
+    inner = next(s for s in scene.shapes
+                 if isinstance(s, sc.Text) and s.text == "re-render")
+    assert frame.y < inner.y
+    assert frame.y + frame.h > inner.y + inner.h
+
+
+# -- class and ER diagrams -------------------------------------------------
+
+CLASSES = """classDiagram
+    class Renderer {
+        <<walker>>
+        +render(tree, buffer)
+        -_emit_table()
+    }
+    class PrintItem
+    PrintItem : +str kind
+    Renderer --> "many" PrintItem : appends
+    Scene <|-- FlowScene
+    Scene *-- Shape
+    Scene o-- Palette
+    Renderer ..> Scene : creates
+"""
+
+
+def test_class_members_come_from_both_spellings():
+    diagram = mermaid.parse(CLASSES)
+    assert diagram.entities["Renderer"].members == ["+render(tree, buffer)", "-_emit_table()"]
+    assert diagram.entities["Renderer"].stereotype == "walker"
+    # `PrintItem : +str kind` declares one member at a time.
+    assert diagram.entities["PrintItem"].members == ["+str kind"]
+
+
+@pytest.mark.parametrize("relation, tail, head, dashed", [
+    ("<|--", "triangle", None, False),
+    ("*--", "diamond", None, False),
+    ("o--", "diamond-open", None, False),
+    ("-->", None, "arrow", False),
+    ("..>", None, "arrow", True),
+    ("..|>", None, "triangle", True),
+    ("--", None, None, False),
+])
+def test_uml_relation_glyphs(relation, tail, head, dashed):
+    diagram = mermaid.parse(f"classDiagram\n  A {relation} B\n")
+    edge = diagram.relations[0]
+    assert (edge.tail, edge.head, edge.dashed) == (tail, head, dashed)
+
+
+def test_class_cardinality_is_kept_per_end():
+    diagram = mermaid.parse('classDiagram\n  A "1" --> "many" B : has\n')
+    edge = diagram.relations[0]
+    assert (edge.src_card, edge.dst_card, edge.label) == ("1", "many", "has")
+
+
+def test_class_scene_draws_a_divider_between_compartments():
+    scene = build(CLASSES)
+    # The Renderer box has members, so it gets a rule under its title; a
+    # bare class (DiagramView-style) does not.
+    solid_rules = [s for s in scene.shapes
+                   if isinstance(s, sc.Line) and len(s.points) == 2
+                   and s.points[0][1] == s.points[1][1] and s.head is None and s.tail is None]
+    assert solid_rules
+
+
+@pytest.mark.parametrize("relation, tail, head", [
+    ("||--o{", "one", "zero-many"),
+    ("||--|{", "one", "one-many"),
+    ("}o--||", "zero-many", "one"),
+    ("|o..o|", "zero-one", "zero-one"),
+])
+def test_er_crow_foot_cardinalities(relation, tail, head):
+    diagram = mermaid.parse(f"erDiagram\n  A {relation} B : rel\n")
+    edge = diagram.relations[0]
+    assert (edge.tail, edge.head) == (tail, head)
+    assert edge.dashed == (".." in relation)
+
+
+def test_er_attribute_block_becomes_members():
+    diagram = mermaid.parse(
+        "erDiagram\n"
+        "  DOCUMENT ||--o{ BLOCK : contains\n"
+        "  DOCUMENT {\n"
+        "    string path\n"
+        "    string title\n"
+        "  }\n"
+    )
+    assert diagram.entities["DOCUMENT"].members == ["string path", "string title"]
+    assert diagram.entities["BLOCK"].members == []
+
+
+def test_er_unclosed_block_is_refused():
+    with pytest.raises(mermaid.Unsupported):
+        mermaid.parse("erDiagram\n  A ||--|| B : rel\n  A {\n    string x\n")
+
+
+def test_entity_boxes_do_not_overlap():
+    diagram = mermaid.parse(CLASSES)
+    mermaid.build_scene(diagram, mermaid.ui_font())
+    entities = list(diagram.entities.values())
+    for index, a in enumerate(entities):
+        for b in entities[index + 1:]:
+            gap_x = abs(a.x - b.x) - (a.w + b.w) / 2
+            gap_y = abs(a.y - b.y) - (a.h + b.h) / 2
+            assert gap_x > 0 or gap_y > 0, f"{a.key} overlaps {b.key}"
+
+
+def test_class_direction_statement_is_honoured():
+    source = "classDiagram\n  direction {}\n  A --> B\n"
+    left_right = mermaid.parse(source.format("LR"))
+    mermaid.build_scene(left_right, mermaid.ui_font())
+    assert left_right.entities["A"].x < left_right.entities["B"].x
+
+    top_down = mermaid.parse(source.format("TB"))
+    mermaid.build_scene(top_down, mermaid.ui_font())
+    assert top_down.entities["A"].y < top_down.entities["B"].y
+
+
+def test_class_diagram_v2_is_the_same_type():
+    assert mermaid.parse("classDiagram-v2\n  A --> B\n").entities.keys() == {"A", "B"}
 
 
 # -- renderer integration --------------------------------------------------

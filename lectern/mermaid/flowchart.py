@@ -17,25 +17,20 @@ meant, whereas the code block is at least honest.
 """
 import re
 
+from . import layered
 from . import scene as sc
+from .common import Unsupported, parse_label
 
 # -- geometry, in nominal 96dpi pixels -------------------------------------
 
 NODE_PAD_X = 14.0
 NODE_PAD_Y = 9.0
 MIN_NODE_W = 46.0
-RANK_GAP = 46.0        # between one layer and the next
-NODE_GAP = 26.0        # between siblings within a layer
-VIRTUAL_W = 14.0       # cross-axis room reserved for an edge passing a layer
 LABEL_PAD = 3.0
 CORNER_RADIUS = 7.0
 EDGE_LABEL_FONT_SCALE = 0.92
 
 _DIRECTIONS = {"TD": "TD", "TB": "TD", "BT": "BT", "LR": "LR", "RL": "RL"}
-
-
-class Unsupported(Exception):
-    """This source is mermaid we don't draw. Caller falls back to code."""
 
 
 # -- parsing ---------------------------------------------------------------
@@ -118,33 +113,11 @@ class FlowEdge:
         self.tail = tail
 
 
-class _Virtual:
-    """A placeholder node an edge is routed through when it spans more
-    than one rank. Without them a long edge cuts straight across whatever
-    happens to sit in the ranks between its ends."""
-    __slots__ = ("key", "w", "h", "x", "y", "rank", "order")
-
-    def __init__(self, key, rank):
-        self.key = key
-        self.w = self.h = VIRTUAL_W
-        self.x = self.y = 0.0
-        self.rank = rank
-        self.order = 0
-
-    @property
-    def virtual(self):
-        return True
-
-
 class Flowchart:
     def __init__(self, direction, nodes, edges):
         self.direction = direction
         self.nodes = nodes          # ordered dict: key -> FlowNode
         self.edges = edges
-
-    @property
-    def vertical(self):
-        return self.direction in ("TD", "BT")
 
     def build_scene(self, measurer):
         return _build_scene(self, measurer)
@@ -179,14 +152,6 @@ def _split_statements(source):
     return statements
 
 
-def _parse_label(text):
-    """Unquote a label and turn mermaid's `<br>` into a real newline."""
-    text = text.strip()
-    if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
-        text = text[1:-1]
-    return re.sub(r"<br\s*/?>", "\n", text).strip()
-
-
 def _parse_node(statement, pos):
     """Parse `ID`, `ID[text]`, `ID{text}`, ... at `pos`.
 
@@ -216,7 +181,7 @@ def _parse_node(statement, pos):
             text = statement[start:close] if close >= 0 else ""
         if close < 0:
             continue  # try the next shape sharing this opening delimiter
-        return key, _parse_label(text), shape, close + len(close_delim)
+        return key, parse_label(text), shape, close + len(close_delim)
     if opened:
         raise Unsupported(f"unterminated shape on node {key}")
     return key, None, None, pos
@@ -252,7 +217,7 @@ def _parse_link(statement, pos):
     if not match:
         return None
     style = "dotted" if match.group("dotted") else "thick" if match.group("thick") else "solid"
-    label = _parse_label(match.group("label")) if match.group("label") else ""
+    label = parse_label(match.group("label")) if match.group("label") else ""
     head = _HEAD_GLYPHS.get(match.group("head") or "")
     tail = "arrow" if match.group("tail") == "<" else _HEAD_GLYPHS.get(match.group("tail") or "")
     return style, label, head, tail, match.end()
@@ -345,292 +310,6 @@ def _size_node(node, measurer):
     node.w, node.h = width, height
 
 
-# -- ranking, ordering, positioning ----------------------------------------
-
-def _rank_nodes(chart):
-    """Longest-path ranking over the edges that aren't back edges.
-
-    Cycles are normal in flowcharts (any retry loop is one), so the back
-    edges found by a DFS are left out of the ranking and simply drawn
-    against the flow, the way dagre does it. Ranking with them included
-    would either not terminate or collapse the loop into one rank.
-    """
-    succ = {key: [] for key in chart.nodes}
-    for edge in chart.edges:
-        if edge.src != edge.dst:
-            succ[edge.src].append(edge.dst)
-
-    WHITE, GREY, BLACK = 0, 1, 2
-    color = {key: WHITE for key in chart.nodes}
-    back = set()
-
-    def visit(start):
-        # Iterative DFS: a deep chain of nodes would otherwise be a
-        # recursion depth away from crashing the viewer.
-        stack = [(start, iter(succ[start]))]
-        color[start] = GREY
-        while stack:
-            node, children = stack[-1]
-            advanced = False
-            for child in children:
-                if color[child] == GREY:
-                    back.add((node, child))
-                elif color[child] == WHITE:
-                    color[child] = GREY
-                    stack.append((child, iter(succ[child])))
-                    advanced = True
-                    break
-            if not advanced:
-                color[node] = BLACK
-                stack.pop()
-
-    for key in chart.nodes:
-        if color[key] == WHITE:
-            visit(key)
-
-    forward = [(edge.src, edge.dst) for edge in chart.edges
-               if edge.src != edge.dst and (edge.src, edge.dst) not in back]
-    rank = {key: 0 for key in chart.nodes}
-    # Relaxation rather than a topological sort: the forward set is
-    # acyclic, so |V| sweeps are guaranteed to settle it, and this needs
-    # no second graph structure to walk.
-    for _ in range(len(chart.nodes)):
-        changed = False
-        for src, dst in forward:
-            if rank[dst] < rank[src] + 1:
-                rank[dst] = rank[src] + 1
-                changed = True
-        if not changed:
-            break
-    for key, node in chart.nodes.items():
-        node.rank = rank[key]
-    return back
-
-
-def _build_layers(chart, back_edges):
-    """Ranked layers with virtual nodes spliced into every long edge.
-
-    Returns (layers, routes) where routes maps each edge to the list of
-    virtual keys it passes through, source-to-target.
-    """
-    cells = dict(chart.nodes)
-    routes = {}
-    counter = 0
-    for index, edge in enumerate(chart.edges):
-        src, dst = chart.nodes[edge.src], chart.nodes[edge.dst]
-        low, high = sorted((src.rank, dst.rank))
-        if high - low <= 1:
-            routes[index] = []
-            continue
-        chain = []
-        for rank in range(low + 1, high):
-            counter += 1
-            key = f"\0v{counter}"
-            cells[key] = _Virtual(key, rank)
-            chain.append(key)
-        if src.rank > dst.rank:
-            chain.reverse()
-        routes[index] = chain
-    max_rank = max(cell.rank for cell in cells.values())
-    layers = [[] for _ in range(max_rank + 1)]
-    for cell in cells.values():
-        layers[cell.rank].append(cell)
-    return cells, layers, routes
-
-
-def _neighbour_map(chart, cells, routes):
-    """Adjacency over the *expanded* graph (virtual nodes included), which
-    is what ordering and placement both work on."""
-    up = {key: [] for key in cells}
-    down = {key: [] for key in cells}
-    for index, edge in enumerate(chart.edges):
-        path = [edge.src] + routes[index] + [edge.dst]
-        for a, b in zip(path, path[1:]):
-            if cells[a].rank == cells[b].rank:
-                continue
-            lower, upper = (a, b) if cells[a].rank < cells[b].rank else (b, a)
-            down[lower].append(upper)
-            up[upper].append(lower)
-    return up, down
-
-
-def _order_layers(layers, up, down, passes=4):
-    """Barycentre sweeps: repeatedly reorder each layer by the average
-    position of its neighbours in the layer just processed. Two or three
-    passes get most of the crossings a flowchart-sized graph has; more
-    stops paying."""
-    for cell_list in layers:
-        for position, cell in enumerate(cell_list):
-            cell.order = position
-
-    def sweep(neighbours, ordered_layers):
-        for cell_list in ordered_layers:
-            def barycentre(cell):
-                positions = [n.order for n in (cells_by_key[k] for k in neighbours[cell.key])]
-                # A cell with no neighbours in the reference layer keeps
-                # its current position rather than being swept to the
-                # front, which is what a 0 barycentre would do.
-                return sum(positions) / len(positions) if positions else cell.order
-            cell_list.sort(key=barycentre)
-            for position, cell in enumerate(cell_list):
-                cell.order = position
-
-    cells_by_key = {cell.key: cell for layer in layers for cell in layer}
-    for index in range(passes):
-        if index % 2 == 0:
-            sweep(up, layers[1:])
-        else:
-            sweep(down, layers[-2::-1])
-
-
-def _cross_size(cell, vertical):
-    return cell.w if vertical else cell.h
-
-
-def _rank_size(cell, vertical):
-    return cell.h if vertical else cell.w
-
-
-def _place(layers, up, down, vertical):
-    """Assign every cell a centre on both axes.
-
-    Rank axis: layers are stacked by their tallest (widest) member.
-    Cross axis: pack each layer, then pull cells toward the average of
-    their neighbours in adjacent layers and re-separate. Sweeping in both
-    directions keeps a node with only successors (a source) as
-    well-aligned as one with only predecessors.
-    """
-    cells_by_key = {cell.key: cell for layer in layers for cell in layer}
-    positions = {}
-
-    rank_pos = 0.0
-    for layer in layers:
-        extent = max((_rank_size(cell, vertical) for cell in layer), default=0.0)
-        for cell in layer:
-            positions[cell.key] = [0.0, rank_pos + extent / 2]
-        rank_pos += extent + RANK_GAP
-
-    def pack(layer):
-        cursor = 0.0
-        for cell in layer:
-            half = _cross_size(cell, vertical) / 2
-            positions[cell.key][0] = max(positions[cell.key][0], cursor + half)
-            cursor = positions[cell.key][0] + half + NODE_GAP
-
-    def separate(layer):
-        """Push apart in both directions so a pulled cell never overlaps
-        its neighbour, and the pull isn't systematically biased toward
-        whichever end the pass started from."""
-        for index in range(1, len(layer)):
-            prev, cell = layer[index - 1], layer[index]
-            minimum = (positions[prev.key][0] + _cross_size(prev, vertical) / 2
-                       + NODE_GAP + _cross_size(cell, vertical) / 2)
-            positions[cell.key][0] = max(positions[cell.key][0], minimum)
-        for index in range(len(layer) - 2, -1, -1):
-            cell, following = layer[index], layer[index + 1]
-            maximum = (positions[following.key][0] - _cross_size(following, vertical) / 2
-                       - NODE_GAP - _cross_size(cell, vertical) / 2)
-            positions[cell.key][0] = min(positions[cell.key][0], maximum)
-
-    for layer in layers:
-        pack(layer)
-
-    for iteration in range(4):
-        neighbours = up if iteration % 2 == 0 else down
-        ordered = layers[1:] if iteration % 2 == 0 else layers[-2::-1]
-        for layer in ordered:
-            for cell in layer:
-                keys = neighbours[cell.key]
-                if keys:
-                    positions[cell.key][0] = sum(
-                        positions[cells_by_key[k].key][0] for k in keys) / len(keys)
-            layer.sort(key=lambda cell: positions[cell.key][0])
-            separate(layer)
-
-    # Nothing above pins the diagram to the origin; shift it there so the
-    # scene's own box starts at (0, 0).
-    lowest = min(positions[cell.key][0] - _cross_size(cell, vertical) / 2
-                 for layer in layers for cell in layer)
-    for layer in layers:
-        for cell in layer:
-            cross, rank = positions[cell.key]
-            cross -= lowest
-            if vertical:
-                cell.x, cell.y = cross, rank
-            else:
-                cell.x, cell.y = rank, cross
-
-
-def _mirror(cells, direction, width, height):
-    """BT and RL are TD and LR drawn backwards along the rank axis."""
-    for cell in cells.values():
-        if direction == "BT":
-            cell.y = height - cell.y
-        elif direction == "RL":
-            cell.x = width - cell.x
-
-
-# -- edge geometry ---------------------------------------------------------
-
-def _boundary_point(cell, toward):
-    """Where the line from `cell`'s centre to `toward` leaves the cell.
-
-    Everything is clipped against the bounding box (circles against their
-    ellipse), which is close enough for the diamond and hexagon that the
-    couple of pixels of overshoot land under the arrowhead anyway.
-    """
-    cx, cy = cell.x, cell.y
-    dx, dy = toward[0] - cx, toward[1] - cy
-    if dx == 0 and dy == 0:
-        return cx, cy
-    if getattr(cell, "shape", None) == "circle":
-        radius_x, radius_y = cell.w / 2, cell.h / 2
-        norm = ((dx / radius_x) ** 2 + (dy / radius_y) ** 2) ** 0.5
-        return cx + dx / norm, cy + dy / norm
-    half_w, half_h = cell.w / 2, cell.h / 2
-    scale = min(half_w / abs(dx) if dx else float("inf"),
-                half_h / abs(dy) if dy else float("inf"))
-    return cx + dx * scale, cy + dy * scale
-
-
-def _edge_points(chart, cells, routes, index, edge):
-    src, dst = cells[edge.src], cells[edge.dst]
-    middle = [(cells[key].x, cells[key].y) for key in routes[index]]
-    first_target = middle[0] if middle else (dst.x, dst.y)
-    last_source = middle[-1] if middle else (src.x, src.y)
-    start = _boundary_point(src, first_target)
-    end = _boundary_point(dst, last_source)
-    return [start] + middle + [end]
-
-
-def _self_loop_points(cell):
-    """A short arc out of the node's right side and back into its top --
-    a self-edge has nowhere else to go, and mermaid draws it the same
-    way."""
-    right = cell.x + cell.w / 2
-    top = cell.y - cell.h / 2
-    reach = max(18.0, cell.h * 0.5)
-    return [
-        (right, cell.y - cell.h * 0.15),
-        (right + reach, cell.y - cell.h * 0.15),
-        (right + reach, top - reach * 0.6),
-        (cell.x + cell.w * 0.2, top - reach * 0.6),
-        (cell.x + cell.w * 0.2, top),
-    ]
-
-
-def _label_position(points):
-    """Midpoint of the edge's longest segment -- the place with the most
-    room for a plate, rather than the geometric middle, which on an
-    L-shaped route lands on the corner."""
-    best, best_length = None, -1.0
-    for (x1, y1), (x2, y2) in zip(points, points[1:]):
-        length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
-        if length > best_length:
-            best, best_length = ((x1 + x2) / 2, (y1 + y2) / 2), length
-    return best
-
-
 # -- scene assembly --------------------------------------------------------
 
 _DASHED = {"dotted": True, "solid": False, "thick": False}
@@ -695,15 +374,8 @@ def _build_scene(chart, measurer):
     for node in chart.nodes.values():
         _size_node(node, measurer)
 
-    back_edges = _rank_nodes(chart)
-    cells, layers, routes = _build_layers(chart, back_edges)
-    up, down = _neighbour_map(chart, cells, routes)
-    _order_layers(layers, up, down)
-    _place(layers, up, down, chart.vertical)
-
-    width = max((cell.x + cell.w / 2 for cell in cells.values()), default=0.0)
-    height = max((cell.y + cell.h / 2 for cell in cells.values()), default=0.0)
-    _mirror(cells, chart.direction, width, height)
+    cells, routes, width, height = layered.layout(
+        chart.nodes, chart.edges, chart.direction)
 
     scene = sc.Scene(width, height, [], measurer.font_px)
 
@@ -711,9 +383,9 @@ def _build_scene(chart, measurer):
     # overshot its boundary, rather than the line being drawn over the box.
     for index, edge in enumerate(chart.edges):
         if edge.src == edge.dst:
-            points = _self_loop_points(cells[edge.src])
+            points = layered.self_loop_points(cells[edge.src])
         else:
-            points = _edge_points(chart, cells, routes, index, edge)
+            points = layered.edge_points(cells, routes, index, edge)
         scene.add(sc.Line(
             points,
             dashed=_DASHED[edge.style],
@@ -724,7 +396,7 @@ def _build_scene(chart, measurer):
         if edge.label:
             text_w, text_h = measurer.size(
                 edge.label, wrap=False, scale=EDGE_LABEL_FONT_SCALE)
-            cx, cy = _label_position(points)
+            cx, cy = layered.label_position(points)
             scene.add(sc.Rect(
                 cx - text_w / 2 - LABEL_PAD, cy - text_h / 2 - LABEL_PAD,
                 text_w + 2 * LABEL_PAD, text_h + 2 * LABEL_PAD,

@@ -209,6 +209,48 @@ flowchart TD
     Changed -->|no| Watch
 ```
 
+A sequence diagram, with a frame and a note:
+
+```mermaid
+sequenceDiagram
+    participant W as Window
+    participant R as Renderer
+    W->>+R: render(tree, buffer)
+    R->>R: walk block nodes
+    Note right of R: tables and diagrams<br/>become anchored widgets
+    loop every block
+        R->>R: append a PrintItem
+    end
+    R-->>-W: print_model
+```
+
+A class diagram and an entity-relationship diagram:
+
+```mermaid
+classDiagram
+    direction LR
+    class PrintItem {
+        +str kind
+        +list runs
+        +int gap
+    }
+    class Renderer {
+        <<walker>>
+        +render(tree, buffer)
+    }
+    Renderer --> "many" PrintItem : appends
+```
+
+```mermaid
+erDiagram
+    DOCUMENT ||--o{ BLOCK : contains
+    BLOCK ||--|{ RUN : "is made of"
+    DOCUMENT {
+        string path
+        string title
+    }
+```
+
 A diagram type this viewer doesn't draw falls back to the code block, so
 the source stays readable rather than being silently dropped:
 

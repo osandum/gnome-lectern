@@ -59,6 +59,59 @@ def _fill_and_stroke(cr, palette, shape, line_width=1.4):
         cr.stroke()
 
 
+# ER cardinality glyphs, as (bars, has_circle, has_crow). "one" is two
+# bars, "zero-one" a bar and a circle, and the "many" ones a crow's foot
+# with whatever qualifies it behind -- the standard reading, where the
+# marks nearest the entity say what that end may hold.
+_CROW_FEET = {
+    "one": (2, False, False),
+    "zero-one": (1, True, False),
+    "many": (0, False, True),
+    "zero-many": (0, True, True),
+    "one-many": (1, False, True),
+}
+CROW_LENGTH = 11.0
+CROW_HALF_WIDTH = 5.0
+BAR_HALF_WIDTH = 5.0
+
+
+def _draw_crow_foot(cr, kind, tip, unit, normal):
+    bars, has_circle, has_crow = _CROW_FEET[kind]
+    ux, uy = unit
+    px, py = normal
+    cr.set_line_width(1.4)
+
+    def at(distance):
+        return tip[0] - ux * distance, tip[1] - uy * distance
+
+    cursor = 0.0
+    if has_crow:
+        # The fan opens *at* the entity, not away from it: its apex is
+        # the point up the line and its three prongs land on the box.
+        # Drawn the other way round it reads as an arrowhead, which in ER
+        # notation means nothing at all.
+        apex = at(CROW_LENGTH)
+        for side in (-1, 0, 1):
+            cr.move_to(*apex)
+            cr.line_to(tip[0] + px * CROW_HALF_WIDTH * side,
+                       tip[1] + py * CROW_HALF_WIDTH * side)
+        cr.stroke()
+        cursor = CROW_LENGTH
+    for index in range(bars):
+        bar_x, bar_y = at(cursor + 5.0 + index * 5.0)
+        cr.move_to(bar_x + px * BAR_HALF_WIDTH, bar_y + py * BAR_HALF_WIDTH)
+        cr.line_to(bar_x - px * BAR_HALF_WIDTH, bar_y - py * BAR_HALF_WIDTH)
+    if bars:
+        cr.stroke()
+        cursor += 5.0 * bars
+    if has_circle:
+        from math import pi
+        radius = 3.6
+        centre = at(cursor + radius + 3.0)
+        cr.arc(centre[0], centre[1], radius, 0, 2 * pi)
+        cr.stroke()
+
+
 def _draw_head(cr, palette, kind, tip, come_from, role):
     """One arrow/circle/cross/triangle/diamond glyph at `tip`, pointing
     away from `come_from`."""
@@ -105,6 +158,17 @@ def _draw_head(cr, palette, kind, tip, come_from, role):
         radius = ARROW_HALF_WIDTH
         cr.arc(tip[0] - ux * radius, tip[1] - uy * radius, radius, 0, 2 * pi)
         cr.fill()
+    elif kind == "open":
+        # The half-arrow mermaid draws for an async message: one barb, so
+        # it reads as "sent, not waited for" beside a filled arrowhead.
+        base = (tip[0] - ux * ARROW_LENGTH, tip[1] - uy * ARROW_LENGTH)
+        cr.set_line_width(1.4)
+        cr.move_to(base[0] + px * ARROW_HALF_WIDTH, base[1] + py * ARROW_HALF_WIDTH)
+        cr.line_to(*tip)
+        cr.line_to(base[0] - px * ARROW_HALF_WIDTH, base[1] - py * ARROW_HALF_WIDTH)
+        cr.stroke()
+    elif kind in _CROW_FEET:
+        _draw_crow_foot(cr, kind, tip, (ux, uy), (px, py))
     elif kind == "cross":
         reach = ARROW_HALF_WIDTH
         cx, cy = tip[0] - ux * reach, tip[1] - uy * reach
