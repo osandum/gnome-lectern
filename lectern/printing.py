@@ -254,7 +254,20 @@ def _line_geometry(layout):
     return result
 
 
-def _build_text_layout(context, style_table, item, width_pt, hanging_pt=0.0, font=None):
+def _leading_pt(context, font):
+    """Line-height padding in points, from the *print* font's own metrics.
+
+    Screen and paper each measure their own font (see tags.line_leading):
+    the two are not always the same family, since a variable UI font gets
+    substituted on paper, and a leading computed for one would be wrong for
+    the other."""
+    metrics = context.create_pango_layout().get_context().get_metrics(font, None)
+    natural = (metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
+    return pt(tagdefs.line_leading(zoomdefs.BASE_PT * 96 / 72, natural / PX_TO_PT))
+
+
+def _build_text_layout(context, style_table, item, width_pt, hanging_pt=0.0,
+                       font=None, leading_pt=0.0):
     combined = "".join(text for text, _tags in item.runs) or " "
     layout = context.create_pango_layout()
     layout.set_font_description(font or _base_font())
@@ -262,12 +275,13 @@ def _build_text_layout(context, style_table, item, width_pt, hanging_pt=0.0, fon
     layout.set_wrap(Pango.WrapMode.WORD_CHAR)
     if hanging_pt:
         layout.set_indent(Pango.units_from_double(-hanging_pt))
-    # Matches the "prose" tag's pixels-inside-wrap on screen (tags.py) --
+    # Matches the "prose" tag's line-height leading on screen (tags.py) --
     # Pango.Layout has no per-run equivalent, so it's set once here at
-    # the whole-layout level instead. Harmless on the rare print code
-    # block that actually wraps (screen never wraps code at all, via
-    # wrap-mode=NONE, but print's layouts are uniformly WORD_CHAR).
-    layout.set_spacing(Pango.units_from_double(pt(tagdefs.PROSE_LINE_SPACING)))
+    # the whole-layout level instead. Pango puts this *between* lines and
+    # not after the last one, which is why _build_blocks adds one more
+    # leading to each block's gap: on screen the equivalent is
+    # pixels-below-lines, which every line gets including a block's last.
+    layout.set_spacing(Pango.units_from_double(leading_pt))
     layout.set_text(combined, -1)
     attr_list = Pango.AttrList()
     byte_offset = 0
@@ -434,6 +448,7 @@ def _build_blocks(context, style_table, print_model, page_width, page_height, da
     # One description for the whole job rather than a Gtk.Settings lookup
     # per layout.
     font = _base_font()
+    leading = _leading_pt(context, font)
     code_bg = style_table.get("code-inline", {}).get("background-rgba")
     code_bg_rgb = _rgba_rgb(code_bg) if code_bg is not None else None
     heading_rule = tagdefs.heading_rule_rgba(dark)
@@ -456,13 +471,14 @@ def _build_blocks(context, style_table, print_model, page_width, page_height, da
                 alt = item.image.alt if item.image is not None else "image"
                 layout = _build_text_layout(
                     context, style_table, _AltTextItem(alt, item.block_tags),
-                    page_width - x, font=font,
+                    page_width - x, font=font, leading_pt=leading,
                 )
                 blocks.append(_Block.text(x, layout))
         elif item.kind == "paragraph":
             x = _left_margin_pt(item.block_tags)
             layout = _build_text_layout(
-                context, style_table, item, page_width - x, _marker_hang_pt(item), font
+                context, style_table, item, page_width - x, _marker_hang_pt(item),
+                font, leading,
             )
             run_tags = {tag for _text, tags in item.runs for tag in tags}
             rule = heading_rule_rgb if run_tags & {"heading1", "heading2"} else None
@@ -476,7 +492,8 @@ def _build_blocks(context, style_table, print_model, page_width, page_height, da
             # every side.
             x = _left_margin_pt(item.block_tags)
             layout = _build_text_layout(
-                context, style_table, item, page_width - x - 2 * CODE_BLOCK_PAD_PT, font=font
+                context, style_table, item, page_width - x - 2 * CODE_BLOCK_PAD_PT,
+                font=font, leading_pt=leading,
             )
             panel = {
                 "x": x,
@@ -496,7 +513,10 @@ def _build_blocks(context, style_table, print_model, page_width, page_height, da
             if row_layouts:
                 blocks.append(_Block.table(x, row_layouts, row_heights, col_widths))
         if len(blocks) > before:
-            blocks[before].gap = pt(item.gap)
+            # One leading on top of the collapsed margin: on screen every
+            # line carries it as pixels-below-lines, including a block's
+            # last, whereas Pango's set_spacing only goes *between* lines.
+            blocks[before].gap = pt(item.gap) + leading
     return blocks
 
 

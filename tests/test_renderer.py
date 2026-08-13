@@ -83,8 +83,17 @@ def test_heading_scales_match_github_ratios():
 
 def test_github_spacing_constants():
     assert zoomdefs.BASE_PT == 12.0
-    assert tagdefs.PROSE_LINE_SPACING == 6
-    assert tagdefs.LIST_ITEM_GAP == 6
+    assert tagdefs.LINE_HEIGHT == 1.5
+    assert tagdefs.LIST_ITEM_GAP == 4
+
+
+def test_line_leading_pads_up_to_the_line_height():
+    """Leading is what the font doesn't already provide, so it is measured
+    against live metrics rather than being a constant -- and never negative,
+    however tall the font's own line box is."""
+    assert tagdefs.line_leading(font_px=16, natural_line_px=19) == 5
+    assert tagdefs.line_leading(font_px=32, natural_line_px=38) == 10
+    assert tagdefs.line_leading(font_px=16, natural_line_px=30) == 0
 
 
 def test_code_block_is_inset_within_the_content_column():

@@ -144,6 +144,24 @@ class Layout:
     def em(self, pixels):
         return pixels / self.font_px
 
+    def pitch_em(self, substring):
+        """Distance from the last rendered line before `substring` to its
+        first, in em -- top of text to top of text.
+
+        The browser-comparable measurement, and the only one that is: a
+        browser has no notion of GTK's line boxes, gap tags or collapsed
+        margins, only where the text finally lands. Everything else here
+        measures the mechanism; this measures the result.
+        """
+        previous = None
+        for line in self.lines:
+            if substring in line.text:
+                assert previous is not None, f"{substring!r} is the first line"
+                return self.em(line.display_ys[0] - previous.display_ys[-1])
+            if line.text.strip():
+                previous = line
+        raise AssertionError(f"no line containing {substring!r}")
+
     def find(self, substring):
         """The first line whose text contains `substring`. Tests address
         lines by content, so inserting a block into the probe document
@@ -404,6 +422,35 @@ def test_list_items_after_the_first_get_the_item_gap():
         layout.em(tagdefs.LIST_ITEM_GAP), abs=TOL)
 
 
+# What a browser actually does with PROBE, rather than what its stylesheet
+# says: Chromium + github-markdown-css v5 at a 16px base, measured with a
+# Range over each text node (one client rect per rendered line) and divided
+# by the font size. Regenerate by rendering PROBE through markdown-it into
+# a .markdown-body div with that stylesheet and reading the rects back.
+#
+# Only the boundaries Lectern is expected to match are listed. The three
+# left out are known divergences with causes of their own, each a separate
+# piece of work: headings (GitHub gives h1-h6 line-height 1.25, Lectern
+# gives them the font's own) and fences (font-size 85%, line-height 1.45).
+GITHUB_PITCH_EM = {
+    "Second paragraph": 2.5,        # paragraph to paragraph
+    "second level one item": 1.75,  # item to sibling item
+    "level two item": 1.5,          # item to its nested list's first item
+    "level three item": 1.5,        # ... and one level deeper
+    "another level two item": 1.75, # back out of a nested list
+    "a blockquote line": 2.5,       # list to blockquote
+}
+
+
+def test_block_pitch_matches_the_browser():
+    """The convergence test. Everything else here asserts Lectern's own
+    model; this asserts the model lands where GitHub lands, which is the
+    point of having a model at all."""
+    layout = measure(PROBE)
+    for probe, expected in GITHUB_PITCH_EM.items():
+        assert layout.pitch_em(probe) == pytest.approx(expected, abs=TOL), probe
+
+
 def test_a_nested_list_is_not_pushed_away_from_its_parent_item():
     """#16. The nested list's opening item used to carry a full block gap
     while every other gap in the same list was the item gap, so the nested
@@ -479,14 +526,18 @@ def test_blockquote_is_indented_from_the_content_column():
         layout.em(tagdefs.BLOCKQUOTE_INDENT), abs=TOL)
 
 
-def test_wrapped_lines_within_a_paragraph_get_the_prose_spacing():
-    """PROSE_LINE_SPACING is pixels-inside-wrap, so it shows up between the
-    display lines of one paragraph and nowhere else."""
+def test_a_line_of_prose_is_one_line_height_tall():
+    """The one assertion here that is a pure ratio, and the reason the rest
+    of the numbers land where GitHub's do: a Gtk.TextView gives a line
+    whatever height the font asks for, where CSS pads every line box out to
+    line-height. tags.line_leading supplies the difference, so consecutive
+    lines of one paragraph sit exactly LINE_HEIGHT apart -- on any font,
+    which is what makes this comparable between a desktop and CI."""
     layout = measure(PROBE)
     line = layout.find("First paragraph")
     assert line.display_lines > 1
-    assert layout.em(line.wrapped_line_spacing) == pytest.approx(
-        layout.em(tagdefs.PROSE_LINE_SPACING), abs=TOL)
+    pitch = line.wrapped_line_spacing + line.text_height
+    assert layout.em(pitch) == pytest.approx(tagdefs.LINE_HEIGHT, abs=TOL)
 
 
 # --- zoom, and the capped measure -----------------------------------------

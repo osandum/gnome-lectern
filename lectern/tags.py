@@ -65,17 +65,24 @@ BASE_FONT_PX = 16.0
 # converges on GitHub's typography elsewhere.
 MAX_MEASURE_EM = 1012 / 16
 
-# Extra space between wrapped display lines *within* one paragraph --
-# distinct from inter-block and inter-list-item spacing. GTK's default is
-# 0, which reads as slightly cramped for prose; applied via the always-on
-# "prose" tag below (see renderer.py's root RenderCtx), not per block
-# type, since it's a base body-text property everything else layers on
-# top of.
-PROSE_LINE_SPACING = 6
+# Body line-height, in em -- GitHub's, and the one length here that is a
+# ratio rather than a pixel count, because that is what a line-height is.
+#
+# A Gtk.TextView has no line-height: its lines are as tall as the font
+# makes them, where CSS pads every line box out to this. The difference
+# (see line_leading below) is real space the browser puts between *every*
+# pair of lines, block boundaries included, and it has to be added by hand
+# or the whole document renders tighter than GitHub by that much -- which
+# is measurable: every inter-block pitch came out ~0.31em short, and a
+# nested list, whose only separation from its parent item is the
+# line-height, had literally no gap at all.
+LINE_HEIGHT = 1.5
 
-# Space above every list item after a list's first. Deliberately larger
-# than GitHub's li + li = 0.25em because that reads too tight in Lectern.
-LIST_ITEM_GAP = 6
+# Space above every list item after a list's first: GitHub's li + li.
+# Only correct alongside the leading above -- with no line-height at all
+# this had to be inflated to 6 to stop lists looking cramped, which then
+# made every list gap bigger than GitHub's.
+LIST_ITEM_GAP = 4
 
 # The Gtk.TextView's own margin on all four sides (decorated_textview.py
 # applies it), i.e. where the content column starts when the window is
@@ -119,6 +126,22 @@ def _rgba(spec):
     rgba = Gdk.RGBA()
     rgba.parse(spec)
     return rgba
+
+
+def line_leading(font_px, natural_line_px):
+    """How much space a line needs *added* to reach LINE_HEIGHT.
+
+    Font-dependent, and therefore never a constant here: the same 16px text
+    is a 19px line box in Adwaita Sans and something else again in DejaVu
+    Sans, so this is computed from live font metrics at both ends --
+    decorated_textview.py's Pango context on screen, printing.py's own font
+    on paper. Expressing it as "pad up to 1.5em" rather than "add 5px" is
+    also what keeps it correct at every zoom level for free.
+
+    Clamped at zero: a font whose natural line box already exceeds the
+    line-height keeps its own metrics rather than having lines overlap.
+    """
+    return max(0, round(LINE_HEIGHT * font_px) - round(natural_line_px))
 
 
 def list_marker_column(level):
@@ -175,12 +198,20 @@ def tag_style_props(dark):
     palette = _DARK if dark else _LIGHT
     props = {
         # Always present in every top-level RenderCtx (see renderer.py),
-        # so it's the one tag guaranteed to overlap every paragraph's
-        # wrapped lines -- including inside blockquotes/list items, since
+        # so it's the one tag guaranteed to cover every line of every
+        # block -- including inside blockquotes/list items, since
         # push_block() only ever appends to block_tags, never replaces
-        # them. Harmless on code-block text too: wrap-mode=NONE there
-        # means lines never wrap, so pixels-inside-wrap has nothing to do.
-        "prose": {"pixels-inside-wrap": PROSE_LINE_SPACING},
+        # them. That makes it the place to hang the line-height leading,
+        # which apply_metrics fills in (it depends on the live font's
+        # metrics, so there is no constant to put here).
+        #
+        # Below-lines rather than above: a block gap is a
+        # pixels-above-lines tag on the same line, and two tags setting
+        # the *same* property don't add -- GTK takes the highest-priority
+        # one, so leading spelled above-lines would be silently replaced
+        # by every block gap in the document. Below plus above are
+        # different properties, and those do add (verified).
+        "prose": {},
         "em": {"style": Pango.Style.ITALIC},
         "strong": {"weight": Pango.Weight.BOLD},
         "strike": {"strikethrough": True},
@@ -305,9 +336,15 @@ def _apply_dynamic_metrics(tag, data):
         tag.set_property("left-margin", round(column * scale) + gutter)
 
 
-def apply_metrics(tag_table, scale=1.0, gutter=0):
-    """Re-scale every length in `tag_table` to zoom factor `scale`, and push
-    the margin-valued ones out by `gutter` pixels.
+def apply_metrics(tag_table, scale=1.0, gutter=0, leading=0):
+    """Re-scale every length in `tag_table` to zoom factor `scale`, push the
+    margin-valued ones out by `gutter` pixels, and give every line
+    `leading` pixels of line-height padding.
+
+    `leading` arrives already in device pixels rather than being scaled
+    like the rest: it comes from the live font's metrics at the current
+    zoom (see line_leading), so it is measured, not derived from a base
+    value.
 
     This is what makes zooming proportional. zoom.py only changes the CSS
     font-size, which the `scale`-valued properties ride for free -- but
@@ -327,6 +364,10 @@ def apply_metrics(tag_table, scale=1.0, gutter=0):
         for prop, value in props.items():
             if prop in _LENGTH_PROPS or prop in _EDGE_PROPS:
                 tag.set_property(prop, _metric(prop, value, scale, gutter))
+    prose = tag_table.lookup("prose")
+    if prose is not None:
+        prose.set_property("pixels-below-lines", leading)
+        prose.set_property("pixels-inside-wrap", leading)
     tag_table.foreach(_apply_dynamic_metrics, (scale, gutter))
 
 

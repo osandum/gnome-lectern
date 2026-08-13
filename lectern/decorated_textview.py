@@ -30,7 +30,8 @@ gi.require_foreign("cairo")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Graphene", "1.0")
-from gi.repository import Gtk, Adw, Graphene
+gi.require_version("Pango", "1.0")
+from gi.repository import Gtk, Adw, Graphene, Pango
 
 from . import tags as tagdefs
 
@@ -94,6 +95,20 @@ class DecoratedTextView(Gtk.TextView):
     def _base_margin(self):
         return round(self._scaled(tagdefs.CONTENT_MARGIN))
 
+    def _leading(self):
+        """The line-height padding for the font this view is actually laying
+        out with, read from its Pango context rather than assumed -- the
+        context reports the CSS font size as soon as zoom.py's provider
+        loads, so this tracks zoom without being scaled like a constant."""
+        context = self.get_pango_context()
+        desc = context.get_font_description()
+        metrics = context.get_metrics(desc, None)
+        natural = (metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
+        font_px = desc.get_size() / Pango.SCALE
+        if font_px <= 0 or natural <= 0:
+            return 0  # not yet styled; the next sync gets it
+        return tagdefs.line_leading(font_px, natural)
+
     def _sync_metrics(self, width=None):
         """Put the content column where the current zoom and window width
         want it.
@@ -114,7 +129,8 @@ class DecoratedTextView(Gtk.TextView):
         self.set_bottom_margin(base)
         buffer = self.get_buffer()
         if buffer is not None:
-            tagdefs.apply_metrics(buffer.get_tag_table(), self._layout_scale, gutter)
+            tagdefs.apply_metrics(buffer.get_tag_table(), self._layout_scale,
+                                  gutter, self._leading())
         self.queue_draw()
 
     def do_size_allocate(self, width, height, baseline):
