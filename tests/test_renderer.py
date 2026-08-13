@@ -197,9 +197,14 @@ def test_a_tight_nested_list_follows_its_parent_item_immediately():
 
 
 def test_a_loose_nested_list_keeps_the_paragraph_margin():
+    """Both sides of the nested list, and the second one is the trap: the
+    nested list owes nothing below itself, so without the following item's
+    own top margin (GitHub's `li > p`) "three" would pull up to the bare
+    item gap -- 1.75em where the browser renders 2.5em."""
+    paragraph = MarkdownRenderer._BLOCK_BOTTOM_MARGIN["paragraph"]
     _renderer, buffer = render("- one\n\n  - nested\n\n- three\n")
-    assert gap_above(buffer, "nested") == MarkdownRenderer._BLOCK_BOTTOM_MARGIN["paragraph"]
-    assert tag_at(buffer, "three", "list-item-gap")
+    assert gap_above(buffer, "nested") == paragraph
+    assert gap_above(buffer, "three") == paragraph
 
 
 def test_collapsed_gap_uses_neighbor_margins():

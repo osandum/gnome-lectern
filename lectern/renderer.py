@@ -107,6 +107,10 @@ class MarkdownRenderer:
     # the container's own type would throw that away.
     _CONTAINER_BLOCKS = {"bullet_list", "ordered_list", "blockquote", "footnote_block"}
     _LIST_BLOCKS = {"bullet_list", "ordered_list"}
+    # GitHub's `li > p { margin-top: 16px }` -- the same 1em everything else
+    # gets, which is the point of writing it this way rather than as its own
+    # number. See _list_item_top_margin.
+    _LOOSE_ITEM_TOP_MARGIN = _BLOCK_BOTTOM_MARGIN["paragraph"]
 
     def __init__(self):
         self.tag_table = None
@@ -275,16 +279,42 @@ class MarkdownRenderer:
 
         A **nested** list owes nothing either (GitHub: `ul ul, ul ol, ol
         ol, ol ul { margin-top: 0; margin-bottom: 0 }`), so returning to
-        the parent list after one costs an item gap rather than a block
-        gap. Top margins need no equivalent here -- no list type is in
-        _BLOCK_TOP_MARGIN to begin with.
+        the parent list after one is left to the following item's own top
+        margin -- see _list_item_top_margin, which is what keeps that from
+        collapsing to nothing in a loose list.
         """
         if node.type == "paragraph" and node.hidden:
             return 0
-        if node.type in cls._LIST_BLOCKS and node.parent is not None \
-                and node.parent.type == "list_item":
+        if cls._is_nested_list(node):
             return 0
         return cls._BLOCK_BOTTOM_MARGIN.get(node.type, 0)
+
+    @classmethod
+    def _is_nested_list(cls, node):
+        """A list that is one of a list item's own blocks rather than a
+        top-level one -- GitHub's `ul ul, ul ol, ol ol, ol ul` selector."""
+        return (node.type in cls._LIST_BLOCKS
+                and node.parent is not None and node.parent.type == "list_item")
+
+    @classmethod
+    def _list_item_top_margin(cls, item):
+        """What a list item asks for above itself.
+
+        A *loose* item's paragraph carries a top margin of its own in
+        GitHub (`li > p { margin-top: 16px }`), and it matters in exactly
+        one place: an item following one that ended in a nested list. That
+        nested list owes nothing below itself, so with only the previous
+        block's margin to go on, the following item pulls up to the bare
+        item gap -- measured at 1.75em against the browser's 2.5em, which
+        is the same asymmetry #16 was about, one level up.
+
+        A tight item has no paragraph to carry a margin, and asks only for
+        GitHub's li + li.
+        """
+        for block in item.children:
+            if block.type == "paragraph":
+                return tagdefs.LIST_ITEM_GAP if block.hidden else cls._LOOSE_ITEM_TOP_MARGIN
+        return tagdefs.LIST_ITEM_GAP
 
     def _record_print_gap(self, first_item, gap):
         """Give the print item a block's spacing wound up on -- the first
@@ -435,18 +465,19 @@ class MarkdownRenderer:
             needs_gap = index > 0
             start_mark = buffer.create_mark(None, it, True) if needs_gap else None
             padding = self._prev_block_padding
-            # What the item above owes below itself, which is the whole
-            # tight/loose difference: nothing in a tight list (its
-            # paragraphs are hidden, see _block_bottom_margin) so items
-            # pack at LIST_ITEM_GAP, a full paragraph margin in a loose
-            # one, so they breathe like the paragraphs they are.
+            # The ordinary collapsed rule, one level down: what the item
+            # above owes below itself against what this one asks for above.
+            # Both sides carry the tight/loose difference -- tight items
+            # neither owe nor ask for more than the item gap, loose ones do
+            # both, so they breathe like the paragraphs they are.
             prev_bottom = self._prev_block_bottom or 0
+            item_top = self._list_item_top_margin(item)
             first_item = len(self.print_model)
             self._walk_list_item(item, buffer, it, child_ctx, ordered)
             if start_mark is not None:
-                gap = max(prev_bottom, tagdefs.LIST_ITEM_GAP) + padding
+                gap = max(prev_bottom, item_top) + padding
                 # The plain case reuses the static tag rather than minting
-                # an identical block-gap-6 one per document.
+                # an identical one per document.
                 is_plain = gap == tagdefs.LIST_ITEM_GAP
                 self._apply_gap(buffer, start_mark, "list-item-gap" if is_plain else gap)
                 self._record_print_gap(first_item, gap)

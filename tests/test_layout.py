@@ -470,26 +470,28 @@ def test_a_nested_list_is_not_pushed_away_from_its_parent_item():
 
 # A blank line between the items is the whole difference from PROBE's list:
 # it makes the list loose, so markdown-it wraps each item's content in a
-# paragraph and the spacing should follow.
+# paragraph and the spacing should follow. Every boundary a loose list has
+# is here -- into a nested list, back out of one, and plain item to item.
 LOOSE_PROBE = """- loose item one
 
-- loose item two
-
   - tight child of a loose item
+
+- loose item after a nested list
+
+- last loose item
 """
 
 
-def test_a_loose_list_spaces_its_items_as_the_paragraphs_they_are():
-    """The counterpart to the test above, and the reason it can't simply
-    hardcode the item gap everywhere: written loose, the same list must
-    space out again. Before tightness was honoured these two rendered
-    identically."""
+def test_a_loose_lists_pitch_matches_the_browser():
+    """The counterpart to the tight case, and the reason that one can't
+    simply hardcode the item gap everywhere: written loose, the same list
+    must space out again -- uniformly, measured in the browser, including
+    coming back *out* of a nested list. That one is the trap, since the
+    nested list owes nothing below itself: the gap has to come from the
+    following item's own top margin instead (GitHub's `li > p`)."""
     layout = measure(LOOSE_PROBE)
-    expected = MarkdownRenderer._BLOCK_BOTTOM_MARGIN["paragraph"]
-    assert layout.em(layout.find("loose item two").space_above) == pytest.approx(
-        layout.em(expected), abs=TOL)
-    assert layout.em(layout.find("tight child").space_above) == pytest.approx(
-        layout.em(expected), abs=TOL)
+    for probe in ("tight child", "loose item after a nested list", "last loose item"):
+        assert layout.pitch_em(probe) == pytest.approx(2.5, abs=TOL), probe
 
 
 def test_list_indent_is_one_step_per_nesting_level():
