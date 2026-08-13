@@ -224,9 +224,7 @@ class MarkdownRenderer:
         t = child.type
         # Both of these have to be read *before* dispatching: walking a
         # container block runs its children through here too, leaving
-        # whatever the last of them owed. That was invisible while every
-        # list item ended in an identical 16 -- the value read back after
-        # dispatch happened to be the one from before it.
+        # whatever the last of them owed.
         prev_bottom = self._prev_block_bottom
         prev_padding = self._prev_block_padding
         start_mark = buffer.create_mark(None, it, True) if prev_bottom is not None else None
@@ -266,22 +264,17 @@ class MarkdownRenderer:
     def _block_bottom_margin(cls, node):
         """The space `node` owes below itself, before collapsing.
 
-        Two blocks owe nothing despite their entry in the table above, both
-        of them list-related and both matching a rule GitHub spells out:
+        Two blocks owe nothing despite their entry in the table above,
+        each matching a rule GitHub spells out:
 
         A paragraph in a **tight** list is not really a paragraph. A list
-        is tight when no blank line separates its items, and markdown-it
-        marks the difference by flagging such paragraphs `hidden` -- it
-        emits no <p> tags for them, so in CSS terms there is no box to
-        carry a margin. Treating them as ordinary paragraphs gave every
-        tight list item a full 1em of trailing space it never asked for,
-        which is what a nested list then collided with (#16).
+        is tight when no blank line separates its items; markdown-it emits
+        no <p> for those items and flags their paragraphs `hidden`, and no
+        <p> means no box to carry a margin.
 
-        A **nested** list owes nothing either (GitHub: `ul ul, ul ol, ol
-        ol, ol ul { margin-top: 0; margin-bottom: 0 }`), so returning to
-        the parent list after one is left to the following item's own top
-        margin -- see _list_item_top_margin, which is what keeps that from
-        collapsing to nothing in a loose list.
+        A **nested** list owes nothing either (`ul ul { margin-top: 0;
+        margin-bottom: 0 }`), which leaves the gap after one to the
+        following item's own top margin -- see _list_item_top_margin.
         """
         if node.type == "paragraph" and node.hidden:
             return 0
@@ -300,16 +293,13 @@ class MarkdownRenderer:
     def _list_item_top_margin(cls, item):
         """What a list item asks for above itself.
 
-        A *loose* item's paragraph carries a top margin of its own in
-        GitHub (`li > p { margin-top: 16px }`), and it matters in exactly
-        one place: an item following one that ended in a nested list. That
-        nested list owes nothing below itself, so with only the previous
-        block's margin to go on, the following item pulls up to the bare
-        item gap -- measured at 1.75em against the browser's 2.5em, which
-        is the same asymmetry #16 was about, one level up.
-
-        A tight item has no paragraph to carry a margin, and asks only for
-        GitHub's li + li.
+        A *loose* item's paragraph carries a top margin of its own
+        (GitHub's `li > p`), which matters in one place: an item following
+        one that ended in a nested list. That list owes nothing below
+        itself, so with only the previous block's margin to go on the
+        following item pulls up to the bare item gap -- 1.75em against the
+        browser's 2.5em. A tight item has no paragraph to carry a margin
+        and asks only for li + li.
         """
         for block in item.children:
             if block.type == "paragraph":
@@ -467,9 +457,7 @@ class MarkdownRenderer:
             padding = self._prev_block_padding
             # The ordinary collapsed rule, one level down: what the item
             # above owes below itself against what this one asks for above.
-            # Both sides carry the tight/loose difference -- tight items
-            # neither owe nor ask for more than the item gap, loose ones do
-            # both, so they breathe like the paragraphs they are.
+            # Both sides carry the tight/loose difference.
             prev_bottom = self._prev_block_bottom or 0
             item_top = self._list_item_top_margin(item)
             first_item = len(self.print_model)

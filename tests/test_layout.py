@@ -150,8 +150,7 @@ class Layout:
 
         The browser-comparable measurement, and the only one that is: a
         browser has no notion of GTK's line boxes, gap tags or collapsed
-        margins, only where the text finally lands. Everything else here
-        measures the mechanism; this measures the result.
+        margins, only where the text lands.
         """
         previous = None
         for line in self.lines:
@@ -443,23 +442,17 @@ GITHUB_PITCH_EM = {
 
 
 def test_block_pitch_matches_the_browser():
-    """The convergence test. Everything else here asserts Lectern's own
-    model; this asserts the model lands where GitHub lands, which is the
-    point of having a model at all."""
+    """The convergence test: everything else here asserts Lectern's own
+    model, this asserts the model lands where GitHub lands."""
     layout = measure(PROBE)
     for probe, expected in GITHUB_PITCH_EM.items():
         assert layout.pitch_em(probe) == pytest.approx(expected, abs=TOL), probe
 
 
 def test_a_nested_list_is_not_pushed_away_from_its_parent_item():
-    """#16. The nested list's opening item used to carry a full block gap
-    while every other gap in the same list was the item gap, so the nested
-    block read as belonging to the item below it rather than the one above.
-
-    PROBE's lists are tight, so their items are not paragraphs and have no
-    paragraph margin to collapse against: the nested list follows its parent
-    immediately, and in no case further off than one of its own siblings.
-    """
+    """PROBE's lists are tight, so their items are not paragraphs and have
+    no paragraph margin to collapse against: a nested list follows its
+    parent closely, and never further off than one of its own siblings."""
     layout = measure(PROBE)
     opening = layout.find("level two item")
     sibling = layout.find("another level two item")
@@ -483,12 +476,10 @@ LOOSE_PROBE = """- loose item one
 
 
 def test_a_loose_lists_pitch_matches_the_browser():
-    """The counterpart to the tight case, and the reason that one can't
-    simply hardcode the item gap everywhere: written loose, the same list
-    must space out again -- uniformly, measured in the browser, including
-    coming back *out* of a nested list. That one is the trap, since the
-    nested list owes nothing below itself: the gap has to come from the
-    following item's own top margin instead (GitHub's `li > p`)."""
+    """Written loose, the same list spaces out again -- uniformly, and
+    including coming back *out* of a nested list. That one is the trap:
+    the nested list owes nothing below itself, so the gap has to come from
+    the following item's own top margin (GitHub's `li > p`)."""
     layout = measure(LOOSE_PROBE)
     for probe in ("tight child", "loose item after a nested list", "last loose item"):
         assert layout.pitch_em(probe) == pytest.approx(2.5, abs=TOL), probe
@@ -529,12 +520,10 @@ def test_blockquote_is_indented_from_the_content_column():
 
 
 def test_a_line_of_prose_is_one_line_height_tall():
-    """The one assertion here that is a pure ratio, and the reason the rest
-    of the numbers land where GitHub's do: a Gtk.TextView gives a line
-    whatever height the font asks for, where CSS pads every line box out to
-    line-height. tags.line_leading supplies the difference, so consecutive
-    lines of one paragraph sit exactly LINE_HEIGHT apart -- on any font,
-    which is what makes this comparable between a desktop and CI."""
+    """A Gtk.TextView gives a line whatever height the font asks for, where
+    CSS pads every line box out to line-height. tags.line_leading supplies
+    the difference, so consecutive lines sit exactly LINE_HEIGHT apart --
+    on any font, which is what makes this portable to CI."""
     layout = measure(PROBE)
     line = layout.find("First paragraph")
     assert line.display_lines > 1
@@ -591,9 +580,8 @@ def test_a_narrow_window_is_not_capped_at_all():
 def test_capping_the_measure_moves_the_whole_column_not_just_prose():
     """The trap in centring a Gtk.TextView's text: a Gtk.TextTag left-margin
     replaces the view's own rather than adding to it, so every indented
-    block is positioned from the window edge. Grow only the view's margins
-    and prose centres itself while lists, blockquotes and fenced code stay
-    pinned to the left -- so each of them has to move by the same amount."""
+    block is positioned from the window edge and has to be moved along by
+    the same amount."""
     narrow = measure(PROBE, width=WIDTH)
     wide = measure(PROBE, width=1600)
     shift = wide.left_margin - narrow.left_margin

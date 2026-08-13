@@ -88,9 +88,8 @@ def test_github_spacing_constants():
 
 
 def test_line_leading_pads_up_to_the_line_height():
-    """Leading is what the font doesn't already provide, so it is measured
-    against live metrics rather than being a constant -- and never negative,
-    however tall the font's own line box is."""
+    """Leading is what the font doesn't already provide -- and never
+    negative, however tall the font's own line box is."""
     assert tagdefs.line_leading(font_px=16, natural_line_px=19) == 5
     assert tagdefs.line_leading(font_px=32, natural_line_px=38) == 10
     assert tagdefs.line_leading(font_px=16, natural_line_px=30) == 0
@@ -154,10 +153,10 @@ def test_fence_gap_reserves_room_for_the_code_panel():
 
 
 def test_fence_inside_a_list_item_pads_the_following_item():
-    """Padding is not a margin: it can never collapse into the gap, because
-    the panel is drawn in exactly that space. What it is added *to* is the
+    """Padding is not a margin: it can't collapse into the gap, because the
+    panel is drawn in exactly that space. What it is added *to* is the
     ordinary collapsed gap -- and this list is loose, so the fence owes a
-    full block margin below itself rather than the bare item gap."""
+    full block margin below itself."""
     _renderer, buffer = render("- one\n\n  ```\n  code\n  ```\n\n- two\n")
     collapsed = max(MarkdownRenderer._BLOCK_BOTTOM_MARGIN["fence"], tagdefs.LIST_ITEM_GAP)
     assert gap_above(buffer, "two") == collapsed + tagdefs.CODE_BLOCK_PADDING
@@ -185,9 +184,8 @@ def test_a_loose_lists_items_get_a_full_paragraph_margin():
 
 
 def test_a_tight_nested_list_follows_its_parent_item_immediately():
-    """The bug in #16: the parent item's text carried a paragraph's bottom
-    margin it never owed, so the nested list started 1em below it while
-    everything around it sat at the item gap."""
+    """A tight item's text carries no paragraph margin, so the nested list
+    follows it at the item gap rather than a block gap."""
     _renderer, buffer = render("- one\n  - nested\n  - nested two\n- three\n")
     assert gap_above(buffer, "nested") == 0
     assert tag_at(buffer, "nested two", "list-item-gap")
@@ -197,10 +195,9 @@ def test_a_tight_nested_list_follows_its_parent_item_immediately():
 
 
 def test_a_loose_nested_list_keeps_the_paragraph_margin():
-    """Both sides of the nested list, and the second one is the trap: the
-    nested list owes nothing below itself, so without the following item's
-    own top margin (GitHub's `li > p`) "three" would pull up to the bare
-    item gap -- 1.75em where the browser renders 2.5em."""
+    """Both sides of the nested list. The second is the trap: the nested
+    list owes nothing below itself, so without the following item's own top
+    margin (GitHub's `li > p`) "three" pulls up to the bare item gap."""
     paragraph = MarkdownRenderer._BLOCK_BOTTOM_MARGIN["paragraph"]
     _renderer, buffer = render("- one\n\n  - nested\n\n- three\n")
     assert gap_above(buffer, "nested") == paragraph

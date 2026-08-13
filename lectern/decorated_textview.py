@@ -58,14 +58,11 @@ def _rounded_rect(cr, x, y, width, height, radius):
 class DecoratedTextView(Gtk.TextView):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # The zoom factor to lay out at, pushed in by zoom.py. Every length
-        # in tags.py is written against a 100% base font, so this is what
-        # turns them into the pixels actually used -- for the margins and
-        # tag properties below, and for the chrome painted further down.
+        # The zoom factor to lay out at, pushed in by zoom.py: tags.py's
+        # lengths are all written against a 100% base font.
         self._layout_scale = 1.0
-        # A buffer arrives with its tags at base values, whatever the
-        # current zoom: window.py swaps in a freshly rendered one on every
-        # open and reload.
+        # A freshly rendered buffer arrives with its tags at base values,
+        # whatever the current zoom.
         self.connect("notify::buffer", lambda *_a: self._sync_metrics())
         self._sync_metrics()
 
@@ -84,11 +81,10 @@ class DecoratedTextView(Gtk.TextView):
         return length * self._layout_scale
 
     def _gutter(self, width):
-        """Extra inset per side, beyond the base content margin, that keeps
+        """Extra inset per side, beyond the base content margin, keeping
         the body text no wider than MAX_MEASURE_EM. Zero until the window
-        is wider than that measure, so nothing about a narrow window
-        changes -- and the ceiling is in em, so it tracks the zoom rather
-        than capping at a fixed pixel count."""
+        exceeds that measure; in em, so it tracks the zoom rather than
+        capping at a fixed pixel count."""
         target = tagdefs.MAX_MEASURE_EM * self._scaled(tagdefs.BASE_FONT_PX)
         return max(0, math.ceil((width - 2 * self._base_margin() - target) / 2))
 
@@ -96,10 +92,9 @@ class DecoratedTextView(Gtk.TextView):
         return round(self._scaled(tagdefs.CONTENT_MARGIN))
 
     def _leading(self):
-        """The line-height padding for the font this view is actually laying
-        out with, read from its Pango context rather than assumed -- the
-        context reports the CSS font size as soon as zoom.py's provider
-        loads, so this tracks zoom without being scaled like a constant."""
+        """Line-height padding for the font this view actually lays out
+        with. The Pango context reports the CSS font size as soon as
+        zoom.py's provider loads, so this tracks zoom on its own."""
         context = self.get_pango_context()
         desc = context.get_font_description()
         metrics = context.get_metrics(desc, None)
@@ -113,13 +108,11 @@ class DecoratedTextView(Gtk.TextView):
         """Put the content column where the current zoom and window width
         want it.
 
-        Both halves are needed, and the second is easy to miss: a
-        Gtk.TextTag left-margin *replaces* the view's rather than adding to
-        it (confirmed empirically), so every tag that spells out an indent
-        -- lists, blockquotes, fenced code -- is positioned from the window
-        edge, not from where prose happens to start. Centring the column by
-        growing the view's own margins alone would move the prose and leave
-        all of those pinned to the left edge.
+        The tag half is easy to miss: a Gtk.TextTag left-margin *replaces*
+        the view's rather than adding to it (confirmed empirically), so
+        every tag spelling out an indent -- lists, blockquotes, fenced code
+        -- is positioned from the window edge. Growing the view's own
+        margins alone centres the prose and leaves those at the left edge.
         """
         base = self._base_margin()
         gutter = self._gutter(self.get_width() if width is None else width)
@@ -135,11 +128,10 @@ class DecoratedTextView(Gtk.TextView):
 
     def do_size_allocate(self, width, height, baseline):
         # Before chaining up, so this allocation already lays out at the
-        # margins its own width implies rather than trailing a frame behind
-        # them. Setting a margin queues a resize, but only when the value
-        # actually changed, and the computation depends on nothing the
-        # margins affect -- so a window resize settles in one extra pass
-        # rather than oscillating.
+        # margins its own width implies. Setting a margin queues a resize,
+        # but only when the value changed, and the computation depends on
+        # nothing the margins affect -- so a resize settles in one extra
+        # pass rather than oscillating.
         self._sync_metrics(width)
         Gtk.TextView.do_size_allocate(self, width, height, baseline)
 

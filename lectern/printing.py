@@ -257,10 +257,8 @@ def _line_geometry(layout):
 def _leading_pt(context, font):
     """Line-height padding in points, from the *print* font's own metrics.
 
-    Screen and paper each measure their own font (see tags.line_leading):
-    the two are not always the same family, since a variable UI font gets
-    substituted on paper, and a leading computed for one would be wrong for
-    the other."""
+    Not the screen's: a variable UI font gets substituted on paper (see
+    _base_font), so the two fonts differ and so does their leading."""
     metrics = context.create_pango_layout().get_context().get_metrics(font, None)
     natural = (metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
     return pt(tagdefs.line_leading(zoomdefs.BASE_PT * 96 / 72, natural / PX_TO_PT))
@@ -276,11 +274,9 @@ def _build_text_layout(context, style_table, item, width_pt, hanging_pt=0.0,
     if hanging_pt:
         layout.set_indent(Pango.units_from_double(-hanging_pt))
     # Matches the "prose" tag's line-height leading on screen (tags.py) --
-    # Pango.Layout has no per-run equivalent, so it's set once here at
-    # the whole-layout level instead. Pango puts this *between* lines and
-    # not after the last one, which is why _build_blocks adds one more
-    # leading to each block's gap: on screen the equivalent is
-    # pixels-below-lines, which every line gets including a block's last.
+    # Pango.Layout has no per-run equivalent, so it's set once here at the
+    # whole-layout level. Pango puts it *between* lines and not after the
+    # last, which is why _build_blocks adds one more to each block's gap.
     layout.set_spacing(Pango.units_from_double(leading_pt))
     layout.set_text(combined, -1)
     attr_list = Pango.AttrList()
@@ -513,9 +509,8 @@ def _build_blocks(context, style_table, print_model, page_width, page_height, da
             if row_layouts:
                 blocks.append(_Block.table(x, row_layouts, row_heights, col_widths))
         if len(blocks) > before:
-            # One leading on top of the collapsed margin: on screen every
-            # line carries it as pixels-below-lines, including a block's
-            # last, whereas Pango's set_spacing only goes *between* lines.
+            # One leading on top of the collapsed margin -- on screen
+            # every line carries it, including a block's last.
             blocks[before].gap = pt(item.gap) + leading
     return blocks
 
