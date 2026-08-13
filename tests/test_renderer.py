@@ -83,8 +83,16 @@ def test_heading_scales_match_github_ratios():
 
 def test_github_spacing_constants():
     assert zoomdefs.BASE_PT == 12.0
-    assert tagdefs.PROSE_LINE_SPACING == 6
-    assert tagdefs.LIST_ITEM_GAP == 6
+    assert tagdefs.LINE_HEIGHT == 1.5
+    assert tagdefs.LIST_ITEM_GAP == 4
+
+
+def test_line_leading_pads_up_to_the_line_height():
+    """Leading is what the font doesn't already provide -- and never
+    negative, however tall the font's own line box is."""
+    assert tagdefs.line_leading(font_px=16, natural_line_px=19) == 5
+    assert tagdefs.line_leading(font_px=32, natural_line_px=38) == 10
+    assert tagdefs.line_leading(font_px=16, natural_line_px=30) == 0
 
 
 def test_code_block_is_inset_within_the_content_column():
@@ -145,10 +153,55 @@ def test_fence_gap_reserves_room_for_the_code_panel():
 
 
 def test_fence_inside_a_list_item_pads_the_following_item():
-    """Padding is not a margin: the fixed list-item gap collapses against
-    nothing, so the panel's bottom padding has to be added to it."""
+    """Padding is not a margin: it can't collapse into the gap, because the
+    panel is drawn in exactly that space. What it is added *to* is the
+    ordinary collapsed gap -- and this list is loose, so the fence owes a
+    full block margin below itself."""
     _renderer, buffer = render("- one\n\n  ```\n  code\n  ```\n\n- two\n")
-    assert gap_above(buffer, "two") == tagdefs.LIST_ITEM_GAP + tagdefs.CODE_BLOCK_PADDING
+    collapsed = max(MarkdownRenderer._BLOCK_BOTTOM_MARGIN["fence"], tagdefs.LIST_ITEM_GAP)
+    assert gap_above(buffer, "two") == collapsed + tagdefs.CODE_BLOCK_PADDING
+
+
+# --- tight vs loose lists -------------------------------------------------
+#
+# A list is tight when no blank line separates its items. markdown-it marks
+# the difference by flagging such items' paragraphs `hidden` -- it emits no
+# <p> for them -- and the renderer honours that: no <p> means no box, which
+# means no paragraph margin (see MarkdownRenderer._block_bottom_margin).
+
+def test_a_tight_lists_items_pack_at_the_item_gap():
+    _renderer, buffer = render("- one\n- two\n")
+    assert gap_above(buffer, "two") is None, \
+        "the flat item gap is the static list-item-gap tag, not a minted one"
+    assert tag_at(buffer, "two", "list-item-gap")
+
+
+def test_a_loose_lists_items_get_a_full_paragraph_margin():
+    """The whole point of writing a list loose: its items are paragraphs and
+    should breathe like them."""
+    _renderer, buffer = render("- one\n\n- two\n")
+    assert gap_above(buffer, "two") == MarkdownRenderer._BLOCK_BOTTOM_MARGIN["paragraph"]
+
+
+def test_a_tight_nested_list_follows_its_parent_item_immediately():
+    """A tight item's text carries no paragraph margin, so the nested list
+    follows it at the item gap rather than a block gap."""
+    _renderer, buffer = render("- one\n  - nested\n  - nested two\n- three\n")
+    assert gap_above(buffer, "nested") == 0
+    assert tag_at(buffer, "nested two", "list-item-gap")
+    # Coming back out of a nested list costs an item gap, not a block one:
+    # a nested list owes nothing below itself either.
+    assert tag_at(buffer, "three", "list-item-gap")
+
+
+def test_a_loose_nested_list_keeps_the_paragraph_margin():
+    """Both sides of the nested list. The second is the trap: the nested
+    list owes nothing below itself, so without the following item's own top
+    margin (GitHub's `li > p`) "three" pulls up to the bare item gap."""
+    paragraph = MarkdownRenderer._BLOCK_BOTTOM_MARGIN["paragraph"]
+    _renderer, buffer = render("- one\n\n  - nested\n\n- three\n")
+    assert gap_above(buffer, "nested") == paragraph
+    assert gap_above(buffer, "three") == paragraph
 
 
 def test_collapsed_gap_uses_neighbor_margins():

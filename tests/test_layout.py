@@ -144,6 +144,23 @@ class Layout:
     def em(self, pixels):
         return pixels / self.font_px
 
+    def pitch_em(self, substring):
+        """Distance from the last rendered line before `substring` to its
+        first, in em -- top of text to top of text.
+
+        The browser-comparable measurement, and the only one that is: a
+        browser has no notion of GTK's line boxes, gap tags or collapsed
+        margins, only where the text lands.
+        """
+        previous = None
+        for line in self.lines:
+            if substring in line.text:
+                assert previous is not None, f"{substring!r} is the first line"
+                return self.em(line.display_ys[0] - previous.display_ys[-1])
+            if line.text.strip():
+                previous = line
+        raise AssertionError(f"no line containing {substring!r}")
+
     def find(self, substring):
         """The first line whose text contains `substring`. Tests address
         lines by content, so inserting a block into the probe document
@@ -323,6 +340,7 @@ Second paragraph, following the first.
 - second level one item
   - level two item
     - level three item
+  - another level two item
 
 > a blockquote line
 
@@ -403,6 +421,70 @@ def test_list_items_after_the_first_get_the_item_gap():
         layout.em(tagdefs.LIST_ITEM_GAP), abs=TOL)
 
 
+# What a browser actually does with PROBE, rather than what its stylesheet
+# says: Chromium + github-markdown-css v5 at a 16px base, measured with a
+# Range over each text node (one client rect per rendered line) and divided
+# by the font size. Regenerate by rendering PROBE through markdown-it into
+# a .markdown-body div with that stylesheet and reading the rects back.
+#
+# Only the boundaries Lectern is expected to match are listed. The three
+# left out are known divergences with causes of their own, each a separate
+# piece of work: headings (GitHub gives h1-h6 line-height 1.25, Lectern
+# gives them the font's own) and fences (font-size 85%, line-height 1.45).
+GITHUB_PITCH_EM = {
+    "Second paragraph": 2.5,        # paragraph to paragraph
+    "second level one item": 1.75,  # item to sibling item
+    "level two item": 1.5,          # item to its nested list's first item
+    "level three item": 1.5,        # ... and one level deeper
+    "another level two item": 1.75, # back out of a nested list
+    "a blockquote line": 2.5,       # list to blockquote
+}
+
+
+def test_block_pitch_matches_the_browser():
+    """The convergence test: everything else here asserts Lectern's own
+    model, this asserts the model lands where GitHub lands."""
+    layout = measure(PROBE)
+    for probe, expected in GITHUB_PITCH_EM.items():
+        assert layout.pitch_em(probe) == pytest.approx(expected, abs=TOL), probe
+
+
+def test_a_nested_list_is_not_pushed_away_from_its_parent_item():
+    """PROBE's lists are tight, so their items are not paragraphs and have
+    no paragraph margin to collapse against: a nested list follows its
+    parent closely, and never further off than one of its own siblings."""
+    layout = measure(PROBE)
+    opening = layout.find("level two item")
+    sibling = layout.find("another level two item")
+    assert layout.em(sibling.space_above) == pytest.approx(
+        layout.em(tagdefs.LIST_ITEM_GAP), abs=TOL)
+    assert layout.em(opening.space_above) <= layout.em(sibling.space_above) + TOL
+
+
+# A blank line between the items is the whole difference from PROBE's list:
+# it makes the list loose, so markdown-it wraps each item's content in a
+# paragraph and the spacing should follow. Every boundary a loose list has
+# is here -- into a nested list, back out of one, and plain item to item.
+LOOSE_PROBE = """- loose item one
+
+  - tight child of a loose item
+
+- loose item after a nested list
+
+- last loose item
+"""
+
+
+def test_a_loose_lists_pitch_matches_the_browser():
+    """Written loose, the same list spaces out again -- uniformly, and
+    including coming back *out* of a nested list. That one is the trap:
+    the nested list owes nothing below itself, so the gap has to come from
+    the following item's own top margin (GitHub's `li > p`)."""
+    layout = measure(LOOSE_PROBE)
+    for probe in ("tight child", "loose item after a nested list", "last loose item"):
+        assert layout.pitch_em(probe) == pytest.approx(2.5, abs=TOL), probe
+
+
 def test_list_indent_is_one_step_per_nesting_level():
     layout = measure(PROBE)
     xs = [layout.find(t).x for t in
@@ -437,14 +519,16 @@ def test_blockquote_is_indented_from_the_content_column():
         layout.em(tagdefs.BLOCKQUOTE_INDENT), abs=TOL)
 
 
-def test_wrapped_lines_within_a_paragraph_get_the_prose_spacing():
-    """PROSE_LINE_SPACING is pixels-inside-wrap, so it shows up between the
-    display lines of one paragraph and nowhere else."""
+def test_a_line_of_prose_is_one_line_height_tall():
+    """A Gtk.TextView gives a line whatever height the font asks for, where
+    CSS pads every line box out to line-height. tags.line_leading supplies
+    the difference, so consecutive lines sit exactly LINE_HEIGHT apart --
+    on any font, which is what makes this portable to CI."""
     layout = measure(PROBE)
     line = layout.find("First paragraph")
     assert line.display_lines > 1
-    assert layout.em(line.wrapped_line_spacing) == pytest.approx(
-        layout.em(tagdefs.PROSE_LINE_SPACING), abs=TOL)
+    pitch = line.wrapped_line_spacing + line.text_height
+    assert layout.em(pitch) == pytest.approx(tagdefs.LINE_HEIGHT, abs=TOL)
 
 
 # --- zoom, and the capped measure -----------------------------------------
@@ -496,9 +580,8 @@ def test_a_narrow_window_is_not_capped_at_all():
 def test_capping_the_measure_moves_the_whole_column_not_just_prose():
     """The trap in centring a Gtk.TextView's text: a Gtk.TextTag left-margin
     replaces the view's own rather than adding to it, so every indented
-    block is positioned from the window edge. Grow only the view's margins
-    and prose centres itself while lists, blockquotes and fenced code stay
-    pinned to the left -- so each of them has to move by the same amount."""
+    block is positioned from the window edge and has to be moved along by
+    the same amount."""
     narrow = measure(PROBE, width=WIDTH)
     wide = measure(PROBE, width=1600)
     shift = wide.left_margin - narrow.left_margin

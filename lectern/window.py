@@ -88,8 +88,7 @@ class LecternWindow(Adw.ApplicationWindow):
         # common) case where _render_document replaces it immediately
         # after, or the empty-state page replaces this view entirely.
         # No margins passed: the view sets its own four, since where the
-        # content column starts depends on how wide the view turns out to
-        # be (it centres a capped text column) and on the zoom level.
+        # content column starts depends on its width and the zoom level.
         self._textview = DecoratedTextView(
             editable=False, cursor_visible=False,
             wrap_mode=Gtk.WrapMode.WORD_CHAR,
@@ -359,11 +358,10 @@ class LecternWindow(Adw.ApplicationWindow):
 
     def _on_zoom_changed(self, controller, factor):
         self._zoom_label.set_text(f"{round(factor * 100)}%")
-        # Zooming moves the view's margins (they scale like everything else)
-        # without the viewport itself changing size, so the page-size signal
-        # the width sync normally rides on never fires -- anchored tables and
-        # separators would keep the previous zoom's width until the next
-        # window resize.
+        # Zooming moves the view's margins without the viewport changing
+        # size, so the page-size signal the width sync rides on never
+        # fires -- anchored tables and separators would otherwise keep the
+        # previous zoom's width until the next window resize.
         self._sync_fill_width_widgets()
         self._flash_zoom_osd()
 

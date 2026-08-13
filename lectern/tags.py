@@ -49,33 +49,29 @@ _DARK = {
 # typography ratios.
 _HEADING_SCALE = [2.0, 1.5, 1.25, 1.0, 0.875, 0.85]
 
-# Every length below -- line spacing, block gaps, indents, margins, and the
-# padding decorated_textview.py paints with -- is in nominal 96dpi pixels
-# against this base font size. One em. They are therefore only correct as
-# written at 100%: at any other zoom they have to be multiplied by the zoom
-# factor first, which is what apply_metrics() does. printing.py is pinned to
-# 100% (see its _base_font) and so spends them as written.
+# Every length below is in nominal 96dpi pixels against this base font
+# size -- one em -- and so is only correct as written at 100% zoom.
+# apply_metrics() scales them; printing.py is pinned to 100% and spends
+# them as written.
 BASE_FONT_PX = 16.0
 
-# Widest the body text column is allowed to get, in em. Past this, a wider
-# window buys wider gutters rather than a longer line: maximised on a wide
-# monitor, a paragraph otherwise runs to 200+ characters where comfortable
-# measure is 45-90. The number is GitHub's own cap (1012px of content
-# against a 16px base), borrowed rather than invented, since Lectern
-# converges on GitHub's typography elsewhere.
+# Widest the body text column is allowed to get, in em: past this a wider
+# window buys wider gutters rather than a longer line. GitHub's own cap
+# (1012px against a 16px base).
 MAX_MEASURE_EM = 1012 / 16
 
-# Extra space between wrapped display lines *within* one paragraph --
-# distinct from inter-block and inter-list-item spacing. GTK's default is
-# 0, which reads as slightly cramped for prose; applied via the always-on
-# "prose" tag below (see renderer.py's root RenderCtx), not per block
-# type, since it's a base body-text property everything else layers on
-# top of.
-PROSE_LINE_SPACING = 6
+# Body line-height, in em -- a ratio rather than a pixel count, because
+# that is what a line-height is. A Gtk.TextView has none: its lines are as
+# tall as the font makes them, where CSS pads every line box out to this.
+# The difference (line_leading below) is space the browser puts between
+# *every* pair of lines, block boundaries included, so without it the whole
+# document renders tighter than GitHub -- and a nested list, whose only
+# separation from its parent item is the line-height, gets no gap at all.
+LINE_HEIGHT = 1.5
 
-# Space above every list item after a list's first. Deliberately larger
-# than GitHub's li + li = 0.25em because that reads too tight in Lectern.
-LIST_ITEM_GAP = 6
+# Space above every list item after a list's first: GitHub's li + li. Only
+# correct alongside the leading above.
+LIST_ITEM_GAP = 4
 
 # The Gtk.TextView's own margin on all four sides (decorated_textview.py
 # applies it), i.e. where the content column starts when the window is
@@ -121,21 +117,29 @@ def _rgba(spec):
     return rgba
 
 
+def line_leading(font_px, natural_line_px):
+    """How much space a line needs *added* to reach LINE_HEIGHT.
+
+    Never a constant: the natural line box is font-dependent (19px for
+    16px Adwaita Sans, different again in DejaVu Sans), so callers measure
+    live metrics -- decorated_textview.py's Pango context on screen,
+    printing.py's own font on paper. Stating it as "pad up to 1.5em" also
+    keeps it right at every zoom level. Clamped at zero so a font with a
+    tall line box keeps its own metrics rather than overlapping.
+    """
+    return max(0, round(LINE_HEIGHT * font_px) - round(natural_line_px))
+
+
 def list_marker_column(level):
     """Where a list item's bullet/number sits at `level`, as a left-margin.
-
     Absolute rather than a per-level increment, because `left-margin`
-    doesn't accumulate -- see ensure_list_indent_tag. Shared with
-    printing.py, which has to place the same block on paper, and with
-    apply_metrics, which rescales these tags from their names.
-    """
+    doesn't accumulate -- see ensure_list_indent_tag."""
     return LIST_INDENT_STEP * (level + 1)
 
 
 def list_text_column(level):
     """Where the item's *text* sits: one hanging indent further in than its
-    marker column, which is where wrapped lines and continuation blocks
-    land."""
+    marker column, where wrapped lines and continuation blocks land."""
     return list_marker_column(level) - LIST_HANGING_INDENT
 
 
@@ -175,12 +179,19 @@ def tag_style_props(dark):
     palette = _DARK if dark else _LIGHT
     props = {
         # Always present in every top-level RenderCtx (see renderer.py),
-        # so it's the one tag guaranteed to overlap every paragraph's
-        # wrapped lines -- including inside blockquotes/list items, since
+        # so it's the one tag guaranteed to cover every line of every
+        # block -- including inside blockquotes/list items, since
         # push_block() only ever appends to block_tags, never replaces
-        # them. Harmless on code-block text too: wrap-mode=NONE there
-        # means lines never wrap, so pixels-inside-wrap has nothing to do.
-        "prose": {"pixels-inside-wrap": PROSE_LINE_SPACING},
+        # them. That makes it where the line-height leading hangs;
+        # apply_metrics fills it in from live font metrics.
+        #
+        # Below-lines rather than above: a block gap is a
+        # pixels-above-lines tag on the same line, and two tags setting
+        # the *same* property don't add -- GTK takes the highest-priority
+        # one, so leading spelled above-lines would be silently replaced
+        # by every block gap in the document. Below plus above are
+        # different properties, and those do add (verified).
+        "prose": {},
         "em": {"style": Pango.Style.ITALIC},
         "strong": {"weight": Pango.Weight.BOLD},
         "strike": {"strikethrough": True},
@@ -287,11 +298,9 @@ def _metric(prop, value, scale, gutter):
 def _apply_dynamic_metrics(tag, data):
     """Rescale one of the renderer's lazily-created tags, recognised by name.
 
-    They can't be re-read from tag_style_props like the static ones: they
-    are minted mid-render, at base values, one per distinct gap or nesting
-    level a document happens to use. The name carries the base value, so it
-    is also the record of what to rescale to -- no separate bookkeeping,
-    and no way for the two to fall out of step.
+    They aren't in tag_style_props: they're minted mid-render, one per
+    distinct gap or nesting level a document uses. The name carries the
+    base value, so it doubles as the record of what to rescale to.
     """
     scale, gutter = data
     kind, _, suffix = (tag.get_property("name") or "").rpartition("-")
@@ -305,16 +314,17 @@ def _apply_dynamic_metrics(tag, data):
         tag.set_property("left-margin", round(column * scale) + gutter)
 
 
-def apply_metrics(tag_table, scale=1.0, gutter=0):
-    """Re-scale every length in `tag_table` to zoom factor `scale`, and push
-    the margin-valued ones out by `gutter` pixels.
+def apply_metrics(tag_table, scale=1.0, gutter=0, leading=0):
+    """Re-scale every length in `tag_table` to zoom factor `scale`, push the
+    margin-valued ones out by `gutter` pixels, and give every line
+    `leading` pixels of line-height padding.
 
-    This is what makes zooming proportional. zoom.py only changes the CSS
-    font-size, which the `scale`-valued properties ride for free -- but
-    every absolute length here is written against BASE_FONT_PX, so without
-    this pass the text doubles at 200% while every gap and indent stays
-    put, and the layout is correctly proportioned at exactly 100% and
-    nowhere else.
+    This is what makes zooming proportional: zoom.py only changes the CSS
+    font-size, which the `scale`-valued properties ride for free, but
+    every absolute length here is written against BASE_FONT_PX and has to
+    be scaled by hand. `leading` is the exception that arrives already in
+    device pixels -- it is measured from live font metrics (line_leading),
+    not derived from a base value.
 
     Only lengths are touched, so this and update_tag_colors compose in
     either order. Which properties are lengths doesn't depend on the
@@ -327,6 +337,10 @@ def apply_metrics(tag_table, scale=1.0, gutter=0):
         for prop, value in props.items():
             if prop in _LENGTH_PROPS or prop in _EDGE_PROPS:
                 tag.set_property(prop, _metric(prop, value, scale, gutter))
+    prose = tag_table.lookup("prose")
+    if prose is not None:
+        prose.set_property("pixels-below-lines", leading)
+        prose.set_property("pixels-inside-wrap", leading)
     tag_table.foreach(_apply_dynamic_metrics, (scale, gutter))
 
 
