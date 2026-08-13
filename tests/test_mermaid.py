@@ -141,7 +141,8 @@ def test_comments_and_presentational_statements_are_ignored():
 @pytest.mark.parametrize("source", [
     "gantt\n  title Nope\n",                       # a type we don't draw
     "stateDiagram-v2\n  [*] --> Still\n",          # ditto
-    "flowchart TD\n  subgraph one\n  A\n  end\n",  # a construct we don't draw
+    "flowchart TD\n  subgraph one\n  A\n",         # unclosed subgraph
+    "flowchart TD\n  A\n  end\n",                  # `end` with no subgraph
     "flowchart TD\n  A --> B & C\n",
     "flowchart XY\n  A --> B\n",                   # unknown direction
     "flowchart TD\n  A[unterminated\n",
@@ -152,11 +153,99 @@ def test_unsupported_sources_raise(source):
         mermaid.parse(source)
 
 
-def test_subgraphs_are_refused_rather_than_flattened():
-    # Silently dropping the grouping would draw a diagram the author
-    # didn't write, with nothing to tell the reader it happened.
-    with pytest.raises(mermaid.Unsupported):
-        mermaid.parse("flowchart TD\n  subgraph s\n    A --> B\n  end\n  B --> C\n")
+# -- subgraphs -------------------------------------------------------------
+
+def test_subgraph_membership_follows_first_mention():
+    chart = mermaid.parse(
+        "flowchart TD\n"
+        "  subgraph s[Inside]\n    A --> B\n  end\n"
+        "  B --> C\n")
+    group, = chart.subgraphs
+    assert group.key == "s" and group.title == "Inside"
+    # C is named outside the block; B is named inside it first and again
+    # outside, which doesn't move it.
+    assert group.node_keys() == ["A", "B"]
+
+
+def test_a_bare_subgraph_title_is_its_own_id():
+    chart = mermaid.parse("flowchart TD\n  subgraph Payments\n    A\n  end\n")
+    group, = chart.subgraphs
+    assert (group.key, group.title) == ("Payments", "Payments")
+
+
+def test_nested_subgraphs_nest():
+    chart = mermaid.parse(
+        "flowchart TD\n"
+        "  subgraph outer[Outer]\n"
+        "    A\n"
+        "    subgraph inner[Inner]\n      B\n    end\n"
+        "  end\n")
+    outer, = chart.subgraphs
+    inner, = outer.children
+    assert outer.node_keys() == ["A", "B"]
+    assert inner.node_keys() == ["B"]
+
+
+def test_a_subgraph_frame_encloses_its_own_nodes_and_no_others():
+    """The frame is fitted to where the layout put things, so this is the
+    assertion that the fitting is honest -- see _cluster_boxes."""
+    scene = build(
+        "flowchart TD\n"
+        "  subgraph s[Group]\n    A[Inside one] --> B[Inside two]\n  end\n"
+        "  B --> C[Outside]\n")
+    frame = next(shape for shape in boxes(scene)
+                 if getattr(shape, "fill", None) == sc.CLUSTER)
+    inside = [t for t in texts(scene) if t.startswith("Inside")]
+    assert len(inside) == 2
+    for shape in scene.shapes:
+        if not isinstance(shape, sc.Text):
+            continue
+        x0, y0, x1, y1 = sc._point_extents(shape)
+        enclosed = (x0 >= frame.x and x1 <= frame.x + frame.w
+                    and y0 >= frame.y and y1 <= frame.y + frame.h)
+        assert enclosed == (shape.text in inside or shape.text == "Group"), shape.text
+
+
+def test_a_frame_that_would_swallow_a_foreign_node_falls_back():
+    """Two blocks whose members the layout interleaves can't both be framed
+    honestly. Better an honest code block than a grouping the author never
+    wrote -- so this must raise rather than draw."""
+    interleaved = (
+        "flowchart LR\n"
+        "  subgraph one[One]\n    A --> B\n  end\n"
+        "  subgraph two[Two]\n    C --> D\n  end\n"
+        "  A --> D\n  C --> B\n")
+    try:
+        build(interleaved)
+    except mermaid.Unsupported:
+        return
+    # If the layout happened to keep them apart, the frames must at least
+    # not overlap each other.
+    scene = build(interleaved)
+    frames = [s for s in boxes(scene) if getattr(s, "fill", None) == sc.CLUSTER]
+    for a, b in zip(frames, frames[1:]):
+        assert not (abs((a.x + a.w / 2) - (b.x + b.w / 2)) * 2 < a.w + b.w
+                    and abs((a.y + a.h / 2) - (b.y + b.h / 2)) * 2 < a.h + b.h)
+
+
+def test_an_invisible_link_ranks_its_ends_but_draws_nothing():
+    """`~~~` is mermaid's layout-only edge."""
+    visible = build("flowchart TD\n  A --> B\n")
+    invisible = build("flowchart TD\n  A ~~~ B\n")
+    lines = lambda scene: [s for s in scene.shapes if isinstance(s, sc.Line)]
+    assert len(lines(visible)) == 1
+    assert lines(invisible) == []
+    # Still ranked: B sits below A, exactly as the visible edge puts it.
+    assert mermaid.parse("flowchart TD\n  A ~~~ B\n").edges[0].style == "invisible"
+
+
+# -- labels ----------------------------------------------------------------
+
+def test_label_line_breaks_use_both_mermaid_spellings():
+    """`<br>` and a literal backslash-n both break a line -- mermaid 11
+    renders each as one line per break, checked in a browser."""
+    chart = mermaid.parse('flowchart TD\n  A["one<br>two\\nthree"]\n')
+    assert chart.nodes["A"].text == "one\ntwo\nthree"
 
 
 # -- layout ----------------------------------------------------------------

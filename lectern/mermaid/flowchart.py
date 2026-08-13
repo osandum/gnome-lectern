@@ -29,6 +29,11 @@ MIN_NODE_W = 46.0
 LABEL_PAD = 3.0
 CORNER_RADIUS = 7.0
 EDGE_LABEL_FONT_SCALE = 0.92
+# Clear space between a subgraph's frame and the nodes inside it, and the
+# scale its title is drawn at.
+CLUSTER_PAD = 14.0
+CLUSTER_RADIUS = 8.0
+CLUSTER_TITLE_SCALE = 0.95
 
 _DIRECTIONS = {"TD": "TD", "TB": "TD", "BT": "BT", "LR": "LR", "RL": "RL"}
 
@@ -39,6 +44,16 @@ _HEADER_RE = re.compile(r"^(?:flowchart|graph)(?:\s+(?P<dir>[A-Za-z]{2}))?\s*$")
 _ID_RE = re.compile(r"[A-Za-z0-9_]+")
 _IGNORED_STATEMENTS = ("style ", "classdef ", "class ", "click ", "linkstyle ",
                        "direction ", "%%")
+
+# `subgraph Id[Title]`, `subgraph Id["Title"]`, or a bare `subgraph Title`
+# -- which mermaid treats as both the id and the label.
+_SUBGRAPH_RE = re.compile(r"""
+    ^subgraph \s+
+    (?:
+        (?P<key>[A-Za-z0-9_]+) \s* \[ (?P<bracket>.*) \] \s*
+      | (?P<bare>.+?) \s*
+    )$
+""", re.X | re.I)
 
 # Shape delimiters, longest first -- "[[" has to be tried before "[", or
 # every subroutine node parses as a rect whose text starts with "[". The
@@ -74,7 +89,8 @@ _LINK_RE = re.compile(r"""
     \s*
     (?P<tail>[<ox])?
     (?:
-        (?P<dotted>-\.-+|-\.)
+        (?P<invisible>~{3,})
+      | (?P<dotted>-\.-+|-\.)
       | (?P<thick>={2,})
       | (?P<solid>-{2,})
     )
@@ -113,11 +129,51 @@ class FlowEdge:
         self.tail = tail
 
 
+class Subgraph:
+    """A `subgraph ... end` block: a frame drawn around its members.
+
+    Membership is recorded rather than the layout being constrained by it.
+    The nodes are laid out exactly as they would be without the block, and
+    the frame is then fitted around wherever they landed -- with a check
+    (see _cluster_boxes) that nothing else landed inside it. That is the
+    honest version of a cut-down layout: a frame that has swallowed a node
+    it doesn't own says something the author didn't write, so the diagram
+    falls back to its source instead.
+    """
+    __slots__ = ("key", "title", "members", "children", "parent")
+
+    def __init__(self, key, title, parent=None):
+        self.key = key
+        self.title = title
+        self.members = []       # node keys directly inside this block
+        self.children = []      # nested Subgraphs
+        self.parent = parent
+
+    def node_keys(self):
+        """Every node inside this block, nested ones included."""
+        keys = list(self.members)
+        for child in self.children:
+            keys.extend(child.node_keys())
+        return keys
+
+
 class Flowchart:
-    def __init__(self, direction, nodes, edges):
+    def __init__(self, direction, nodes, edges, subgraphs=()):
         self.direction = direction
         self.nodes = nodes          # ordered dict: key -> FlowNode
         self.edges = edges
+        self.subgraphs = list(subgraphs)   # top-level blocks; each may nest
+
+    def all_subgraphs(self):
+        """Every block, outermost first, so a parent's frame is drawn
+        before the child that sits on top of it."""
+        out = []
+        stack = list(reversed(self.subgraphs))
+        while stack:
+            group = stack.pop()
+            out.append(group)
+            stack.extend(reversed(group.children))
+        return out
 
     def build_scene(self, measurer):
         return _build_scene(self, measurer)
@@ -216,7 +272,13 @@ def _parse_link(statement, pos):
     match = _LINK_RE.match(statement, pos)
     if not match:
         return None
-    style = "dotted" if match.group("dotted") else "thick" if match.group("thick") else "solid"
+    # `~~~` is mermaid's invisible link: it ranks its ends like any other
+    # edge but draws nothing, which is how authors force a node into a
+    # particular layer. Parsing it as a style rather than skipping the
+    # statement keeps that layout effect.
+    style = ("invisible" if match.group("invisible")
+             else "dotted" if match.group("dotted")
+             else "thick" if match.group("thick") else "solid")
     label = parse_label(match.group("label")) if match.group("label") else ""
     head = _HEAD_GLYPHS.get(match.group("head") or "")
     tail = "arrow" if match.group("tail") == "<" else _HEAD_GLYPHS.get(match.group("tail") or "")
@@ -237,6 +299,8 @@ def parse(source):
 
     nodes = {}
     edges = []
+    subgraphs = []      # top-level blocks
+    open_blocks = []    # the `subgraph`s currently being read, innermost last
 
     def touch(key, text, shape):
         node = nodes.get(key)
@@ -245,6 +309,11 @@ def parse(source):
             # label, which is what mermaid shows until a shaped
             # declaration turns up.
             node = nodes[key] = FlowNode(key, text if text is not None else key, shape or "rect")
+            # Membership follows first mention, as mermaid's does: a node
+            # named inside a block belongs to it, and naming it again
+            # outside doesn't move it.
+            if open_blocks:
+                open_blocks[-1].members.append(key)
         elif text is not None:
             node.text = text
             node.shape = shape or node.shape
@@ -252,11 +321,24 @@ def parse(source):
 
     for statement in statements[1:]:
         lowered = statement.lower()
-        if lowered.startswith("subgraph") or lowered == "end":
-            # Deliberately unsupported rather than flattened: dropping the
-            # grouping would silently redraw the author's diagram as a
-            # different one.
-            raise Unsupported("subgraphs are not supported")
+        if lowered.startswith("subgraph"):
+            match = _SUBGRAPH_RE.match(statement)
+            if not match:
+                raise Unsupported(f"unparsed subgraph header {statement!r}")
+            if match.group("key") is not None:
+                key, title = match.group("key"), parse_label(match.group("bracket"))
+            else:
+                key = title = parse_label(match.group("bare"))
+            parent = open_blocks[-1] if open_blocks else None
+            group = Subgraph(key, title, parent)
+            (parent.children if parent is not None else subgraphs).append(group)
+            open_blocks.append(group)
+            continue
+        if lowered == "end":
+            if not open_blocks:
+                raise Unsupported("`end` outside a subgraph")
+            open_blocks.pop()
+            continue
         if any(lowered.startswith(prefix) for prefix in _IGNORED_STATEMENTS):
             continue
         if "&" in statement:
@@ -274,9 +356,11 @@ def parse(source):
             touch(next_key, text, shape)
             edges.append(FlowEdge(key, next_key, label, style, head, tail))
             key = next_key
+    if open_blocks:
+        raise Unsupported("unclosed subgraph")
     if not nodes:
         raise Unsupported("no nodes")
-    return Flowchart(direction, nodes, edges)
+    return Flowchart(direction, nodes, edges, subgraphs)
 
 
 # -- sizing ----------------------------------------------------------------
@@ -314,6 +398,7 @@ def _size_node(node, measurer):
 
 _DASHED = {"dotted": True, "solid": False, "thick": False}
 _STROKE_WIDTH = {"thick": 2.4, "solid": 1.4, "dotted": 1.4}
+INVISIBLE = "invisible"
 
 
 def _node_shapes(node):
@@ -370,18 +455,100 @@ def _node_shapes(node):
     return [sc.Rect(x, y, w, h, fill=sc.NODE, stroke=sc.EDGE)]
 
 
+def _title_height(group, measurer):
+    return measurer.size(group.title, wrap=False, scale=CLUSTER_TITLE_SCALE)[1]
+
+
+def _reserve_cluster_room(chart, measurer):
+    """Grow every node inside a subgraph by the room its frames need.
+
+    The layout knows nothing about subgraphs, so the space around a block
+    has to exist before it runs -- afterwards there is nowhere to put a
+    frame that doesn't already have a node in it. Each enclosing block
+    contributes its padding on both sides plus its title band, in both
+    axes: which axis the band lands on depends on the diagram's direction,
+    and one generous rank is a much better failure than a frame that
+    overlaps the node above it.
+
+    Returns the original sizes, to restore before the boxes are drawn.
+    """
+    original = {key: (node.w, node.h) for key, node in chart.nodes.items()}
+    for group in chart.all_subgraphs():
+        margin = 2 * CLUSTER_PAD + _title_height(group, measurer)
+        for key in group.node_keys():
+            node = chart.nodes[key]
+            node.w += margin
+            node.h += margin
+    return original
+
+
+def _cluster_boxes(chart, measurer):
+    """(group, x, y, w, h, title_h) per subgraph, fitted to where its
+    members actually landed.
+
+    Raises Unsupported if a frame would enclose a node that isn't its own.
+    The layout is free to interleave two blocks' members -- nothing above
+    stops it -- and a frame drawn around a foreign node states a grouping
+    the author didn't write, which is exactly the kind of quiet mis-draw
+    this package falls back rather than commit.
+    """
+    boxes = {}
+    for group in reversed(chart.all_subgraphs()):   # innermost first
+        keys = group.node_keys()
+        if not keys:
+            raise Unsupported(f"empty subgraph {group.key!r}")
+        rects = [(chart.nodes[k].x - chart.nodes[k].w / 2,
+                  chart.nodes[k].y - chart.nodes[k].h / 2,
+                  chart.nodes[k].w, chart.nodes[k].h) for k in keys]
+        rects += [boxes[child.key][1:5] for child in group.children]
+        x0 = min(r[0] for r in rects) - CLUSTER_PAD
+        y0 = min(r[1] for r in rects) - CLUSTER_PAD
+        x1 = max(r[0] + r[2] for r in rects) + CLUSTER_PAD
+        y1 = max(r[1] + r[3] for r in rects) + CLUSTER_PAD
+        title_h = _title_height(group, measurer)
+        y0 -= title_h
+        boxes[group.key] = (group, x0, y0, x1 - x0, y1 - y0, title_h)
+
+    owned = {group.key: set(group.node_keys()) for group in chart.all_subgraphs()}
+    for key, (group, x0, y0, w, h, _title_h) in boxes.items():
+        for node_key, node in chart.nodes.items():
+            if node_key in owned[key]:
+                continue
+            if (abs(node.x - (x0 + w / 2)) * 2 < w + node.w
+                    and abs(node.y - (y0 + h / 2)) * 2 < h + node.h):
+                raise Unsupported(
+                    f"subgraph {group.key!r} would enclose {node_key!r}")
+    return [boxes[group.key] for group in chart.all_subgraphs()]
+
+
 def _build_scene(chart, measurer):
     for node in chart.nodes.values():
         _size_node(node, measurer)
+    original_sizes = _reserve_cluster_room(chart, measurer)
 
     cells, routes, width, height = layered.layout(
         chart.nodes, chart.edges, chart.direction)
 
+    for key, (w, h) in original_sizes.items():
+        chart.nodes[key].w, chart.nodes[key].h = w, h
+    clusters = _cluster_boxes(chart, measurer)
+
     scene = sc.Scene(width, height, [], measurer.font_px)
+
+    # Frames first, outermost first: everything else in the diagram is
+    # drawn on top of them. Their titles are held back to the very end --
+    # an edge crossing the frame's top band puts its own opaque label plate
+    # exactly where the title is, and the title is the more structural of
+    # the two, so it wins.
+    for group, x, y, w, h, title_h in clusters:
+        scene.add(sc.Rect(x, y, w, h, radius=CLUSTER_RADIUS,
+                          fill=sc.CLUSTER, stroke=sc.EDGE, dashed=True))
 
     # Edges first so a node's fill covers the stub of any line that
     # overshot its boundary, rather than the line being drawn over the box.
     for index, edge in enumerate(chart.edges):
+        if edge.style == INVISIBLE:
+            continue    # ranked above, drawn never
         if edge.src == edge.dst:
             points = layered.self_loop_points(cells[edge.src])
         else:
@@ -413,6 +580,19 @@ def _build_scene(chart, measurer):
         text_w, text_h = measurer.size(node.text)
         scene.add(sc.Text(
             node.x - text_w / 2, node.y - text_h / 2, text_w, text_h, node.text))
+
+    for group, x, y, w, h, title_h in clusters:
+        if not group.title:
+            continue
+        text_w, text_h = measurer.size(
+            group.title, wrap=False, scale=CLUSTER_TITLE_SCALE)
+        title_x = x + (w - text_w) / 2
+        title_y = y + (title_h - text_h) / 2 + CLUSTER_PAD / 2
+        scene.add(sc.Rect(title_x - LABEL_PAD, title_y - LABEL_PAD,
+                          text_w + 2 * LABEL_PAD, text_h + 2 * LABEL_PAD,
+                          radius=3.0, fill=sc.CLUSTER))
+        scene.add(sc.Text(title_x, title_y, text_w, text_h, group.title,
+                          color=sc.DIM, scale=CLUSTER_TITLE_SCALE))
 
     # Self loops arc above their node and edge labels overhang the
     # leftmost box, so the box the widget draws into comes from the shapes

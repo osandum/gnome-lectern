@@ -11,15 +11,17 @@ class Unsupported(Exception):
 
 
 def parse_label(text):
-    """Unquote a label and turn mermaid's `<br>` into a real newline.
+    """Unquote a label and turn mermaid's two line-break spellings into
+    real newlines.
 
-    Mermaid's own labels are HTML, and `<br>` is the one piece of it that
-    turns up in ordinary diagrams often enough to matter. Everything else
-    is left exactly as written rather than half-stripped: showing a stray
-    tag is at least visibly wrong, where quietly dropping the text inside
-    one is not.
+    Both are ordinary in hand-written diagrams: `<br>` because mermaid's
+    labels are HTML, and a literal backslash-n because mermaid accepts it
+    too (verified against mermaid 11 in a browser -- it splits the label
+    into one line per `\\n`). Everything else is left exactly as written
+    rather than half-stripped: showing a stray tag is at least visibly
+    wrong, where quietly dropping the text inside one is not.
     """
     text = text.strip()
     if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
         text = text[1:-1]
-    return _BR_RE.sub("\n", text).strip()
+    return _BR_RE.sub("\n", text).replace("\\n", "\n").strip()

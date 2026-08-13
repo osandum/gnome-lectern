@@ -56,9 +56,25 @@ def font_for(base, font_px, *, bold=False, italic=False, mono=False):
     return desc
 
 
+def _unhint_metrics(context):
+    """Turn off metric hinting, on both the measuring and the drawing side.
+
+    Hinted glyph advances are rounded to whole *device* pixels, so they
+    stop being proportional to the font size the moment a context is
+    scaled -- and view.py scales its context to fit a diagram into the
+    window. A label measured at 1.0 then re-wraps when drawn at 0.82, which
+    put a third line inside a box laid out for two. Unhinted advances scale
+    linearly, so measurement and drawing agree at every zoom level.
+    """
+    options = cairo.FontOptions()
+    options.set_hint_metrics(cairo.HINT_METRICS_OFF)
+    PangoCairo.context_set_font_options(context, options)
+    return context
+
+
 def make_layout(context, base_font, font_px, text, *, bold=False, italic=False,
                 mono=False, max_px=None, width=None, align="center"):
-    layout = Pango.Layout(context)
+    layout = Pango.Layout(_unhint_metrics(context))
     layout.set_font_description(font_for(base_font, font_px, bold=bold, italic=italic, mono=mono))
     layout.set_text(text, -1)
     if width is not None:
