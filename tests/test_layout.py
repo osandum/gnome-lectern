@@ -323,6 +323,7 @@ Second paragraph, following the first.
 - second level one item
   - level two item
     - level three item
+  - another level two item
 
 > a blockquote line
 
@@ -401,6 +402,47 @@ def test_list_items_after_the_first_get_the_item_gap():
     line = layout.find("second level one item")
     assert layout.em(line.space_above) == pytest.approx(
         layout.em(tagdefs.LIST_ITEM_GAP), abs=TOL)
+
+
+def test_a_nested_list_is_not_pushed_away_from_its_parent_item():
+    """#16. The nested list's opening item used to carry a full block gap
+    while every other gap in the same list was the item gap, so the nested
+    block read as belonging to the item below it rather than the one above.
+
+    PROBE's lists are tight, so their items are not paragraphs and have no
+    paragraph margin to collapse against: the nested list follows its parent
+    immediately, and in no case further off than one of its own siblings.
+    """
+    layout = measure(PROBE)
+    opening = layout.find("level two item")
+    sibling = layout.find("another level two item")
+    assert layout.em(sibling.space_above) == pytest.approx(
+        layout.em(tagdefs.LIST_ITEM_GAP), abs=TOL)
+    assert layout.em(opening.space_above) <= layout.em(sibling.space_above) + TOL
+
+
+# A blank line between the items is the whole difference from PROBE's list:
+# it makes the list loose, so markdown-it wraps each item's content in a
+# paragraph and the spacing should follow.
+LOOSE_PROBE = """- loose item one
+
+- loose item two
+
+  - tight child of a loose item
+"""
+
+
+def test_a_loose_list_spaces_its_items_as_the_paragraphs_they_are():
+    """The counterpart to the test above, and the reason it can't simply
+    hardcode the item gap everywhere: written loose, the same list must
+    space out again. Before tightness was honoured these two rendered
+    identically."""
+    layout = measure(LOOSE_PROBE)
+    expected = MarkdownRenderer._BLOCK_BOTTOM_MARGIN["paragraph"]
+    assert layout.em(layout.find("loose item two").space_above) == pytest.approx(
+        layout.em(expected), abs=TOL)
+    assert layout.em(layout.find("tight child").space_above) == pytest.approx(
+        layout.em(expected), abs=TOL)
 
 
 def test_list_indent_is_one_step_per_nesting_level():

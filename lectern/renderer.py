@@ -106,6 +106,7 @@ class MarkdownRenderer:
     # recorded whatever trailing padding is owed, so re-deriving it from
     # the container's own type would throw that away.
     _CONTAINER_BLOCKS = {"bullet_list", "ordered_list", "blockquote", "footnote_block"}
+    _LIST_BLOCKS = {"bullet_list", "ordered_list"}
 
     def __init__(self):
         self.tag_table = None
@@ -217,16 +218,22 @@ class MarkdownRenderer:
         block.
         """
         t = child.type
+        # Both of these have to be read *before* dispatching: walking a
+        # container block runs its children through here too, leaving
+        # whatever the last of them owed. That was invisible while every
+        # list item ended in an identical 16 -- the value read back after
+        # dispatch happened to be the one from before it.
+        prev_bottom = self._prev_block_bottom
         prev_padding = self._prev_block_padding
-        start_mark = buffer.create_mark(None, it, True) if self._prev_block_bottom is not None else None
+        start_mark = buffer.create_mark(None, it, True) if prev_bottom is not None else None
         first_item = len(self.print_model)
         self._dispatch_block_node(t, child, buffer, it, ctx)
         if start_mark is not None:
-            gap = max(self._prev_block_bottom, self._BLOCK_TOP_MARGIN.get(t, 0))
+            gap = max(prev_bottom, self._BLOCK_TOP_MARGIN.get(t, 0))
             gap += prev_padding + self._BLOCK_PADDING.get(t, 0)
             self._apply_gap(buffer, start_mark, gap)
             self._record_print_gap(first_item, gap)
-        self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN.get(t, 0)
+        self._prev_block_bottom = self._block_bottom_margin(child)
         if t not in self._CONTAINER_BLOCKS:
             self._prev_block_padding = self._BLOCK_PADDING.get(t, 0)
 
@@ -250,6 +257,34 @@ class MarkdownRenderer:
             self._walk_footnote_block(child, buffer, it, ctx)
         # Anything else (raw html_block, etc.) is silently skipped -- v1
         # scope cut, not requested.
+
+    @classmethod
+    def _block_bottom_margin(cls, node):
+        """The space `node` owes below itself, before collapsing.
+
+        Two blocks owe nothing despite their entry in the table above, both
+        of them list-related and both matching a rule GitHub spells out:
+
+        A paragraph in a **tight** list is not really a paragraph. A list
+        is tight when no blank line separates its items, and markdown-it
+        marks the difference by flagging such paragraphs `hidden` -- it
+        emits no <p> tags for them, so in CSS terms there is no box to
+        carry a margin. Treating them as ordinary paragraphs gave every
+        tight list item a full 1em of trailing space it never asked for,
+        which is what a nested list then collided with (#16).
+
+        A **nested** list owes nothing either (GitHub: `ul ul, ul ol, ol
+        ol, ol ul { margin-top: 0; margin-bottom: 0 }`), so returning to
+        the parent list after one costs an item gap rather than a block
+        gap. Top margins need no equivalent here -- no list type is in
+        _BLOCK_TOP_MARGIN to begin with.
+        """
+        if node.type == "paragraph" and node.hidden:
+            return 0
+        if node.type in cls._LIST_BLOCKS and node.parent is not None \
+                and node.parent.type == "list_item":
+            return 0
+        return cls._BLOCK_BOTTOM_MARGIN.get(node.type, 0)
 
     def _record_print_gap(self, first_item, gap):
         """Give the print item a block's spacing wound up on -- the first
@@ -400,13 +435,20 @@ class MarkdownRenderer:
             needs_gap = index > 0
             start_mark = buffer.create_mark(None, it, True) if needs_gap else None
             padding = self._prev_block_padding
+            # What the item above owes below itself, which is the whole
+            # tight/loose difference: nothing in a tight list (its
+            # paragraphs are hidden, see _block_bottom_margin) so items
+            # pack at LIST_ITEM_GAP, a full paragraph margin in a loose
+            # one, so they breathe like the paragraphs they are.
+            prev_bottom = self._prev_block_bottom or 0
             first_item = len(self.print_model)
             self._walk_list_item(item, buffer, it, child_ctx, ordered)
             if start_mark is not None:
-                gap = tagdefs.LIST_ITEM_GAP + padding
-                # The padding-free case reuses the static tag rather than
-                # minting an identical block-gap-6 one per document.
-                self._apply_gap(buffer, start_mark, "list-item-gap" if not padding else gap)
+                gap = max(prev_bottom, tagdefs.LIST_ITEM_GAP) + padding
+                # The plain case reuses the static tag rather than minting
+                # an identical block-gap-6 one per document.
+                is_plain = gap == tagdefs.LIST_ITEM_GAP
+                self._apply_gap(buffer, start_mark, "list-item-gap" if is_plain else gap)
                 self._record_print_gap(first_item, gap)
 
     def _walk_list_item(self, item, buffer, it, ctx, ordered):
@@ -473,7 +515,7 @@ class MarkdownRenderer:
             runs = [(marker_text, [marker_tag])]
             buffer.insert_with_tags_by_name(it, marker_text, *(ctx.block_tags + [marker_tag]))
             self._emit_paragraph_body(first, buffer, it, ctx, runs)
-            self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN["paragraph"]
+            self._prev_block_bottom = self._block_bottom_margin(first)
             self._prev_block_padding = 0
         else:
             buffer.insert_with_tags_by_name(it, marker_text + "\n", *(ctx.block_tags + [marker_tag]))
@@ -481,7 +523,11 @@ class MarkdownRenderer:
                 PrintItem("paragraph", runs=[(marker_text, [marker_tag])], block_tags=list(ctx.block_tags))
             )
             rest = block_children
-            self._prev_block_bottom = self._BLOCK_BOTTOM_MARGIN["paragraph"]
+            # A bare marker on a line of its own -- an item that opens with
+            # a fence or a nested list, so markdown-it emitted no paragraph
+            # to consult. There is no paragraph here to owe a paragraph's
+            # margin, and whatever follows brings its own top margin.
+            self._prev_block_bottom = 0
             self._prev_block_padding = 0
         if hang_mark is not None:
             self._tag_first_line(buffer, hang_mark, "list-hang")
