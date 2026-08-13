@@ -79,6 +79,31 @@
   </requires>
 
   <releases>
+    <release version="0.2.0" date="2026-08-13">
+      <description>
+        <p>
+          Mermaid diagrams in fenced code blocks are now drawn, rather
+          than shown as source. Flowcharts, sequence diagrams, class
+          diagrams and entity-relationship diagrams are painted natively,
+          so they appear in printouts too and no browser engine is
+          involved. Anything outside the supported subset still falls back
+          to a highlighted code block.
+        </p>
+        <p>
+          Body text no longer runs the full width of the window: it is
+          capped at a comfortable measure and centred, the way a page of
+          prose should read on a wide screen.
+        </p>
+        <p>
+          Zooming now scales the whole layout. Line spacing, block gaps,
+          indents and margins grow and shrink with the text instead of
+          staying put, so a document reads the same at every zoom level.
+          Line height, list spacing and the space around nested lists have
+          been brought in line with how the same Markdown renders on
+          GitHub.
+        </p>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-08-08">
       <description>
         <p>
