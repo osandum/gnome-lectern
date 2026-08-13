@@ -183,13 +183,12 @@ def _settle(view, expected_px, timeout_ms=5000):
 
 
 def _build_view():
-    """A view configured exactly as window.py configures the real one -- the
-    margins are part of what is being measured."""
+    """A view configured exactly as window.py configures the real one -- no
+    margins passed, because the view sets its own from its allocated width,
+    which is precisely what the measure test below is checking."""
     view = DecoratedTextView(
         editable=False, cursor_visible=False,
         wrap_mode=Gtk.WrapMode.WORD_CHAR,
-        left_margin=tagdefs.CONTENT_MARGIN, right_margin=tagdefs.CONTENT_MARGIN,
-        top_margin=tagdefs.CONTENT_MARGIN, bottom_margin=tagdefs.CONTENT_MARGIN,
     )
     view.add_css_class("lectern-content")
     return view
@@ -270,9 +269,15 @@ def measure(markdown_text, width=WIDTH, zoom_factor=1.0):
         f"wrong -- see this module's docstring, point 2.")
 
     # Force the width: with no window manager the presented window is not
-    # the size it asked for (docstring, point 3).
+    # the size it asked for (docstring, point 3). Twice, either side of the
+    # drain: the view sets its own margins from the width it is allocated,
+    # which queues a resize, and servicing that queue is what lets the
+    # wrongly-sized toplevel allocate the view back down to its own idea of
+    # the width. The second call has the last word, and needs no drain after
+    # it -- every measurement below validates the layout on demand.
     view.allocate(width, HEIGHT, -1, None)
     _drain()
+    view.allocate(width, HEIGHT, -1, None)
 
     layout = Layout(
         lines=[_line_geometry(view, buffer, n)
@@ -409,13 +414,20 @@ def test_list_indent_is_one_step_per_nesting_level():
 
 
 def test_list_marker_hangs_left_of_its_text_column():
-    """The marker line starts one hanging indent left of the item's own
-    left margin, so wrapped lines align under the text, not the bullet."""
+    """The marker line sits at the marker column and the item's wrapped
+    lines one hanging indent further in, so they align under the text
+    rather than under the bullet.
+
+    Which way round matters: a negative Pango indent (what
+    LIST_HANGING_INDENT is) leaves the *first* line alone and indents the
+    ones after it, so the marker line's own x is the plain marker column.
+    """
     layout = measure(PROBE)
-    marker_x = layout.find("level one item").x
-    expected = (tagdefs.CONTENT_MARGIN + tagdefs.LIST_INDENT_STEP
-                + tagdefs.LIST_HANGING_INDENT)
-    assert layout.em(marker_x) == pytest.approx(layout.em(expected), abs=TOL)
+    marker = layout.find("level one item")
+    assert layout.em(marker.x) == pytest.approx(
+        layout.em(tagdefs.list_marker_column(0)), abs=TOL)
+    assert layout.em(tagdefs.list_text_column(0) - marker.x) == pytest.approx(
+        layout.em(-tagdefs.LIST_HANGING_INDENT), abs=TOL)
 
 
 def test_blockquote_is_indented_from_the_content_column():
@@ -435,15 +447,12 @@ def test_wrapped_lines_within_a_paragraph_get_the_prose_spacing():
         layout.em(tagdefs.PROSE_LINE_SPACING), abs=TOL)
 
 
-# --- the two open bugs ----------------------------------------------------
+# --- zoom, and the capped measure -----------------------------------------
 #
-# Written as the behaviour the issues ask for and marked strict-xfail, so
-# each one turns into a *failing* test the moment its fix lands, which is
-# the signal to delete the marker rather than the assertion.
+# These two started as strict-xfails describing issues #5 and #6. They are
+# the acceptance criteria for both fixes, which is why they assert the
+# *ratios* rather than any particular constant.
 
-@pytest.mark.xfail(strict=True, reason="issue #6: spacing and indents are "
-                                       "absolute pixels, so only zoom 1.0 is "
-                                       "correctly proportioned")
 def test_zoom_preserves_every_em_ratio():
     at_100 = measure(PROBE, zoom_factor=1.0)
     at_200 = measure(PROBE, zoom_factor=2.0)
@@ -461,8 +470,6 @@ def test_zoom_preserves_every_em_ratio():
         "list indent"
 
 
-@pytest.mark.xfail(strict=True, reason="issue #5: no maximum line length, so "
-                                       "text runs the full window width")
 def test_text_column_is_capped_at_a_comfortable_measure():
     """Asserted in em, not characters. Characters-per-line is the meaningful
     complaint (45-90 is the usual comfortable range) but it is not portable:
@@ -476,3 +483,27 @@ def test_text_column_is_capped_at_a_comfortable_measure():
         f"text column is {measured:.0f} em wide at {layout.width}px "
         f"({chars} characters of body text per line); comfortable is "
         f"<= {REFERENCE_MEASURE_EM} em")
+
+
+def test_a_narrow_window_is_not_capped_at_all():
+    """The cap only ever takes width away from a window that has more than
+    the measure needs -- below that it must be inert, not a minimum."""
+    layout = measure(PROBE, width=WIDTH)
+    assert layout.left_margin == tagdefs.CONTENT_MARGIN
+    assert layout.right_margin == tagdefs.CONTENT_MARGIN
+
+
+def test_capping_the_measure_moves_the_whole_column_not_just_prose():
+    """The trap in centring a Gtk.TextView's text: a Gtk.TextTag left-margin
+    replaces the view's own rather than adding to it, so every indented
+    block is positioned from the window edge. Grow only the view's margins
+    and prose centres itself while lists, blockquotes and fenced code stay
+    pinned to the left -- so each of them has to move by the same amount."""
+    narrow = measure(PROBE, width=WIDTH)
+    wide = measure(PROBE, width=1600)
+    shift = wide.left_margin - narrow.left_margin
+    assert shift > 0, "the wide window must actually be capped for this to test anything"
+    for probe in ("level one item", "level two item", "a blockquote line",
+                  'fenced = "code"'):
+        assert wide.find(probe).x - narrow.find(probe).x == pytest.approx(
+            shift, abs=1), probe

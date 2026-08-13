@@ -1,14 +1,27 @@
-"""CSS-font-size-based zoom. Heading/code/footnote tags carry static,
-never-recomputed `scale` values (see tags.py) that GTK composes on top of
-whatever font-size this controller sets -- so zooming never touches the
-tag table, just one Gtk.CssProvider rule."""
+"""CSS-font-size-based zoom, in two halves -- because Gtk.TextTag has two
+kinds of size property.
+
+Heading/code/footnote tags carry static, never-recomputed `scale` values
+(see tags.py) that GTK composes on top of whatever font-size the
+Gtk.CssProvider here sets, so those ride the CSS rule for free. Every
+*absolute* length in tags.py -- line spacing, block gaps, indents, margins
+-- does not, and is re-scaled through DecoratedTextView.set_layout_scale
+below. Setting only the font-size, which is all this module used to do,
+left the rendering correctly proportioned at exactly 100% and nowhere
+else: at 200% the text doubled while every gap and indent stayed put.
+"""
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gtk, Gdk, GObject
 
+from . import tags as tagdefs
+
 STEPS = [0.5, 0.67, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 3.0, 4.0]
-BASE_PT = 12.0
+# 100% is tags.py's base font, in the points CSS wants rather than the
+# nominal 96dpi pixels every length there is written in -- one base size
+# for the whole app, not two that can drift apart.
+BASE_PT = tagdefs.BASE_FONT_PX * 72 / 96
 DEFAULT_INDEX = STEPS.index(1.0)
 
 # Unique per-instance CSS class so each window's provider only ever
@@ -43,6 +56,7 @@ class ZoomController(GObject.Object):
     def _apply(self):
         css = f"textview.{self._css_class} {{ font-size: {BASE_PT * self.factor:.1f}pt; }}"
         self._provider.load_from_string(css)
+        self.textview.set_layout_scale(self.factor)
         self.emit("changed", self.factor)
 
     def zoom_in(self):

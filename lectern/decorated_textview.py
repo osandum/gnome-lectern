@@ -17,6 +17,11 @@ tags.py for the rule, and renderer.py's fence block margins (which add
 CODE_BLOCK_PADDING on top of the normal inter-block gap) for the code
 panel. Changing one without the other makes the chrome overlap its
 neighbours.
+
+This view also owns the *content column*: where the text starts, how wide
+it is allowed to get, and the scale everything is laid out at. Both live
+here rather than in window.py because both are answers to "how wide am I",
+which only the widget being allocated knows -- see _sync_metrics.
 """
 import math
 
@@ -50,6 +55,78 @@ def _rounded_rect(cr, x, y, width, height, radius):
 
 
 class DecoratedTextView(Gtk.TextView):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # The zoom factor to lay out at, pushed in by zoom.py. Every length
+        # in tags.py is written against a 100% base font, so this is what
+        # turns them into the pixels actually used -- for the margins and
+        # tag properties below, and for the chrome painted further down.
+        self._layout_scale = 1.0
+        # A buffer arrives with its tags at base values, whatever the
+        # current zoom: window.py swaps in a freshly rendered one on every
+        # open and reload.
+        self.connect("notify::buffer", lambda *_a: self._sync_metrics())
+        self._sync_metrics()
+
+    # -- the content column ------------------------------------------------
+
+    def set_layout_scale(self, scale):
+        """Lay out at `scale` (1.0 == 100%). zoom.py owns this value."""
+        if scale == self._layout_scale:
+            return
+        self._layout_scale = scale
+        self._sync_metrics()
+
+    def _scaled(self, length):
+        """One of tags.py's base-100% lengths, in the pixels this view is
+        currently drawing at."""
+        return length * self._layout_scale
+
+    def _gutter(self, width):
+        """Extra inset per side, beyond the base content margin, that keeps
+        the body text no wider than MAX_MEASURE_EM. Zero until the window
+        is wider than that measure, so nothing about a narrow window
+        changes -- and the ceiling is in em, so it tracks the zoom rather
+        than capping at a fixed pixel count."""
+        target = tagdefs.MAX_MEASURE_EM * self._scaled(tagdefs.BASE_FONT_PX)
+        return max(0, math.ceil((width - 2 * self._base_margin() - target) / 2))
+
+    def _base_margin(self):
+        return round(self._scaled(tagdefs.CONTENT_MARGIN))
+
+    def _sync_metrics(self, width=None):
+        """Put the content column where the current zoom and window width
+        want it.
+
+        Both halves are needed, and the second is easy to miss: a
+        Gtk.TextTag left-margin *replaces* the view's rather than adding to
+        it (confirmed empirically), so every tag that spells out an indent
+        -- lists, blockquotes, fenced code -- is positioned from the window
+        edge, not from where prose happens to start. Centring the column by
+        growing the view's own margins alone would move the prose and leave
+        all of those pinned to the left edge.
+        """
+        base = self._base_margin()
+        gutter = self._gutter(self.get_width() if width is None else width)
+        self.set_left_margin(base + gutter)
+        self.set_right_margin(base + gutter)
+        self.set_top_margin(base)
+        self.set_bottom_margin(base)
+        buffer = self.get_buffer()
+        if buffer is not None:
+            tagdefs.apply_metrics(buffer.get_tag_table(), self._layout_scale, gutter)
+        self.queue_draw()
+
+    def do_size_allocate(self, width, height, baseline):
+        # Before chaining up, so this allocation already lays out at the
+        # margins its own width implies rather than trailing a frame behind
+        # them. Setting a margin queues a resize, but only when the value
+        # actually changed, and the computation depends on nothing the
+        # margins affect -- so a window resize settles in one extra pass
+        # rather than oscillating.
+        self._sync_metrics(width)
+        Gtk.TextView.do_size_allocate(self, width, height, baseline)
+
     # -- buffer/geometry helpers -------------------------------------------
 
     def _visible_bounds(self):
@@ -159,7 +236,7 @@ class DecoratedTextView(Gtk.TextView):
         code text's own left margin minus that padding, which the
         code-block tag sets so the edge lands exactly where surrounding
         prose starts."""
-        pad = tagdefs.CODE_BLOCK_PADDING
+        pad = self._scaled(tagdefs.CODE_BLOCK_PADDING)
         for start, end in ranges:
             rect = self._union_rects(self._display_line_rects(start, end))
             if rect is None:
@@ -170,13 +247,14 @@ class DecoratedTextView(Gtk.TextView):
             right = max(self._content_right(), x + width + pad)
             _rounded_rect(
                 cr, x - pad, y - pad, right - (x - pad), height + pad * 2,
-                tagdefs.CODE_BLOCK_RADIUS,
+                self._scaled(tagdefs.CODE_BLOCK_RADIUS),
             )
             self._set_source_rgba(cr, color)
             cr.fill()
 
     def _draw_code_chips(self, cr, ranges, color):
-        pad_x, pad_y = tagdefs.INLINE_CODE_PAD_X, tagdefs.INLINE_CODE_PAD_Y
+        pad_x = self._scaled(tagdefs.INLINE_CODE_PAD_X)
+        pad_y = self._scaled(tagdefs.INLINE_CODE_PAD_Y)
         for start, end in ranges:
             # Per display line, not per range: a chip that wraps gets one
             # box on each line rather than a single box spanning both.
@@ -184,7 +262,7 @@ class DecoratedTextView(Gtk.TextView):
                 _rounded_rect(
                     cr, x - pad_x, y - pad_y,
                     width + pad_x * 2, height + pad_y * 2,
-                    tagdefs.INLINE_CODE_RADIUS,
+                    self._scaled(tagdefs.INLINE_CODE_RADIUS),
                 )
                 self._set_source_rgba(cr, color)
                 cr.fill()
@@ -193,7 +271,7 @@ class DecoratedTextView(Gtk.TextView):
         color = tagdefs.heading_rule_rgba(Adw.StyleManager.get_default().get_dark())
         right = self._content_right()
         self._set_source_rgba(cr, color)
-        cr.set_line_width(tagdefs.HEADING_RULE_WIDTH)
+        cr.set_line_width(self._scaled(tagdefs.HEADING_RULE_WIDTH))
         for start, end in ranges:
             rect = self._union_rects(self._display_line_rects(start, end))
             if rect is None:
@@ -201,7 +279,7 @@ class DecoratedTextView(Gtk.TextView):
             x, y, width, height = rect
             # Half-pixel offset so a 1px stroke lands on one device pixel
             # instead of straddling two and rendering as a grey smear.
-            rule_y = round(y + height + tagdefs.HEADING_RULE_PAD) + 0.5
+            rule_y = round(y + height + self._scaled(tagdefs.HEADING_RULE_PAD)) + 0.5
             cr.move_to(x, rule_y)
             cr.line_to(max(right, x + width), rule_y)
             cr.stroke()
