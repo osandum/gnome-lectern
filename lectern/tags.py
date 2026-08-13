@@ -49,6 +49,22 @@ _DARK = {
 # typography ratios.
 _HEADING_SCALE = [2.0, 1.5, 1.25, 1.0, 0.875, 0.85]
 
+# Every length below -- line spacing, block gaps, indents, margins, and the
+# padding decorated_textview.py paints with -- is in nominal 96dpi pixels
+# against this base font size. One em. They are therefore only correct as
+# written at 100%: at any other zoom they have to be multiplied by the zoom
+# factor first, which is what apply_metrics() does. printing.py is pinned to
+# 100% (see its _base_font) and so spends them as written.
+BASE_FONT_PX = 16.0
+
+# Widest the body text column is allowed to get, in em. Past this, a wider
+# window buys wider gutters rather than a longer line: maximised on a wide
+# monitor, a paragraph otherwise runs to 200+ characters where comfortable
+# measure is 45-90. The number is GitHub's own cap (1012px of content
+# against a 16px base), borrowed rather than invented, since Lectern
+# converges on GitHub's typography elsewhere.
+MAX_MEASURE_EM = 1012 / 16
+
 # Extra space between wrapped display lines *within* one paragraph --
 # distinct from inter-block and inter-list-item spacing. GTK's default is
 # 0, which reads as slightly cramped for prose; applied via the always-on
@@ -61,11 +77,14 @@ PROSE_LINE_SPACING = 6
 # than GitHub's li + li = 0.25em because that reads too tight in Lectern.
 LIST_ITEM_GAP = 6
 
-# The Gtk.TextView's own margin on all four sides (window.py applies it),
-# i.e. where the content column starts. Lives here because Gtk.TextTag's
-# left-margin/right-margin *replace* the view's rather than adding to it,
-# so any tag wanting an inset relative to the content column has to spell
-# out the sum itself -- see "code-block" below.
+# The Gtk.TextView's own margin on all four sides (decorated_textview.py
+# applies it), i.e. where the content column starts when the window is
+# narrow enough not to be capped at MAX_MEASURE_EM. Lives here because
+# Gtk.TextTag's left-margin/right-margin *replace* the view's rather than
+# adding to it, so any tag wanting an inset relative to the content column
+# has to spell out the sum itself -- see "code-block" below -- and, for the
+# same reason, has to be moved along by hand when the column is centred
+# (the `gutter` argument to apply_metrics).
 CONTENT_MARGIN = 16
 
 # Chrome that Gtk.TextTag can't express and decorated_textview.py paints
@@ -100,6 +119,24 @@ def _rgba(spec):
     rgba = Gdk.RGBA()
     rgba.parse(spec)
     return rgba
+
+
+def list_marker_column(level):
+    """Where a list item's bullet/number sits at `level`, as a left-margin.
+
+    Absolute rather than a per-level increment, because `left-margin`
+    doesn't accumulate -- see ensure_list_indent_tag. Shared with
+    printing.py, which has to place the same block on paper, and with
+    apply_metrics, which rescales these tags from their names.
+    """
+    return LIST_INDENT_STEP * (level + 1)
+
+
+def list_text_column(level):
+    """Where the item's *text* sits: one hanging indent further in than its
+    marker column, which is where wrapped lines and continuation blocks
+    land."""
+    return list_marker_column(level) - LIST_HANGING_INDENT
 
 
 def link_color_hex(dark):
@@ -222,6 +259,77 @@ def tag_style_props(dark):
     return props
 
 
+# How each kind of property in the table above is maintained once a tag
+# exists. Colors are re-applied when the desktop theme flips
+# (update_tag_colors); lengths when the zoom factor or the content column
+# moves (apply_metrics). Everything else -- weight, style, wrap-mode, and
+# `scale` -- is set once at construction and never touched again. `scale`
+# in particular is deliberately not a length: it's a multiplier GTK
+# already composes on top of whatever font size zoom.py's CSS sets.
+_COLOR_PROPS = frozenset({"foreground-rgba", "background-rgba"})
+# Lengths that are pure sizes: zoom is all that moves them.
+_LENGTH_PROPS = frozenset({
+    "pixels-inside-wrap", "pixels-above-lines", "pixels-below-lines",
+    "indent", "rise",
+})
+# Lengths measured from the edge of the text window rather than from the
+# content column. A Gtk.TextTag left/right-margin *replaces* the view's own
+# (see CONTENT_MARGIN), so a tag spelling out an indent in one of these has
+# to carry the current gutter as well as the zoom -- otherwise centring the
+# text column moves prose and leaves every indented block behind.
+_EDGE_PROPS = frozenset({"left-margin", "right-margin"})
+
+
+def _metric(prop, value, scale, gutter):
+    return round(value * scale) + (gutter if prop in _EDGE_PROPS else 0)
+
+
+def _apply_dynamic_metrics(tag, data):
+    """Rescale one of the renderer's lazily-created tags, recognised by name.
+
+    They can't be re-read from tag_style_props like the static ones: they
+    are minted mid-render, at base values, one per distinct gap or nesting
+    level a document happens to use. The name carries the base value, so it
+    is also the record of what to rescale to -- no separate bookkeeping,
+    and no way for the two to fall out of step.
+    """
+    scale, gutter = data
+    kind, _, suffix = (tag.get_property("name") or "").rpartition("-")
+    if not suffix.isdigit():
+        return
+    n = int(suffix)  # a gap in base pixels, or a nesting level
+    if kind == "block-gap":
+        tag.set_property("pixels-above-lines", round(n * scale))
+    elif kind in ("list-indent", "list-body"):
+        column = (list_marker_column if kind == "list-indent" else list_text_column)(n)
+        tag.set_property("left-margin", round(column * scale) + gutter)
+
+
+def apply_metrics(tag_table, scale=1.0, gutter=0):
+    """Re-scale every length in `tag_table` to zoom factor `scale`, and push
+    the margin-valued ones out by `gutter` pixels.
+
+    This is what makes zooming proportional. zoom.py only changes the CSS
+    font-size, which the `scale`-valued properties ride for free -- but
+    every absolute length here is written against BASE_FONT_PX, so without
+    this pass the text doubles at 200% while every gap and indent stays
+    put, and the layout is correctly proportioned at exactly 100% and
+    nowhere else.
+
+    Only lengths are touched, so this and update_tag_colors compose in
+    either order. Which properties are lengths doesn't depend on the
+    palette, so the light table is read purely for its shape.
+    """
+    for name, props in tag_style_props(dark=False).items():
+        tag = tag_table.lookup(name)
+        if tag is None:
+            continue
+        for prop, value in props.items():
+            if prop in _LENGTH_PROPS or prop in _EDGE_PROPS:
+                tag.set_property(prop, _metric(prop, value, scale, gutter))
+    tag_table.foreach(_apply_dynamic_metrics, (scale, gutter))
+
+
 def _make_tag(name, props):
     tag = Gtk.TextTag(name=name)
     for prop, value in props.items():
@@ -238,13 +346,20 @@ def create_tag_table(dark=False):
 
 
 def update_tag_colors(tag_table, dark):
-    """Re-apply theme-dependent colors in place (called on dark-mode change)."""
+    """Re-apply theme-dependent colors in place (called on dark-mode change).
+
+    Colors only: the lengths in the same table belong to apply_metrics, and
+    re-applying those from the base table here would quietly reset a zoomed,
+    centred document to 100% spacing at the window edge the moment the
+    desktop flipped light/dark.
+    """
     for name, props in tag_style_props(dark).items():
         tag = tag_table.lookup(name)
         if tag is None:
             continue
         for prop, value in props.items():
-            tag.set_property(prop, value)
+            if prop in _COLOR_PROPS:
+                tag.set_property(prop, value)
 
 
 def get_or_create_tag(tag_table, name, props=None):
@@ -263,7 +378,12 @@ def get_or_create_tag(tag_table, name, props=None):
 
 
 def ensure_block_gap_tag(tag_table, pixels):
-    """Lazily create and cache a block-gap tag with `pixels-above-lines`."""
+    """Lazily create and cache a block-gap tag with `pixels-above-lines`.
+
+    `pixels` is a base, 100%-zoom value, as everything the renderer works
+    in is: a tag minted mid-render carries it as written, and apply_metrics
+    scales it to the live zoom afterwards.
+    """
     pixels = max(0, int(pixels))
     return get_or_create_tag(
         tag_table,
@@ -298,11 +418,9 @@ def ensure_list_indent_tag(tag_table, level):
     """
     name = list_indent_tag_name(level)
     if tag_table.lookup(name) is None:
-        marker_column = LIST_INDENT_STEP * (level + 1)
-        get_or_create_tag(tag_table, name, {"left-margin": marker_column})
-        get_or_create_tag(tag_table, list_body_tag_name(level), {
-            "left-margin": marker_column - LIST_HANGING_INDENT,
-        })
+        get_or_create_tag(tag_table, name, {"left-margin": list_marker_column(level)})
+        get_or_create_tag(tag_table, list_body_tag_name(level),
+                          {"left-margin": list_text_column(level)})
     return tag_table.lookup(name)
 
 

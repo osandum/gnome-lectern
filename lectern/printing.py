@@ -175,10 +175,10 @@ def _left_margin_pt(block_tags):
     two. Print's page margin is the equivalent of the view's.
     """
     columns = [
-        tagdefs.LIST_INDENT_STEP * (int(name.rsplit("-", 1)[1]) + 1)
         # A "list-body-" tag is the same level's text column, one hanging
         # indent further in than its marker column.
-        - (tagdefs.LIST_HANGING_INDENT if name.startswith("list-body-") else 0)
+        (tagdefs.list_text_column if name.startswith("list-body-")
+         else tagdefs.list_marker_column)(int(name.rsplit("-", 1)[1]))
         for name in block_tags
         if name.startswith("list-indent-") or name.startswith("list-body-")
     ]
