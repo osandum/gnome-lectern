@@ -183,6 +183,84 @@ line 100 of a deliberately long code block
 | Footnotes    | Yes       | Click to jump                 |
 | Editing      | No        | This is a viewer              |
 
+## Mermaid diagrams
+
+A `mermaid` fence is drawn rather than listed:
+
+```mermaid
+flowchart LR
+    Open([Open file]) --> Parse[markdown-it-py]
+    Parse --> Walk{Node type?}
+    Walk -- block --> Buffer[(TextBuffer)]
+    Walk -- table --> Grid[[Gtk.Grid]]
+    Walk -. mermaid .-> Scene((Scene))
+    Buffer --> Show[Present window]
+    Grid --> Show
+    Scene --> Show
+```
+
+Top-down, with a loop back to an earlier node:
+
+```mermaid
+flowchart TD
+    Watch[Watch the file] --> Changed{Changed?}
+    Changed -->|yes| Reload[Re-render]
+    Reload --> Watch
+    Changed -->|no| Watch
+```
+
+A sequence diagram, with a frame and a note:
+
+```mermaid
+sequenceDiagram
+    participant W as Window
+    participant R as Renderer
+    W->>+R: render(tree, buffer)
+    R->>R: walk block nodes
+    Note right of R: tables and diagrams<br/>become anchored widgets
+    loop every block
+        R->>R: append a PrintItem
+    end
+    R-->>-W: print_model
+```
+
+A class diagram and an entity-relationship diagram:
+
+```mermaid
+classDiagram
+    direction LR
+    class PrintItem {
+        +str kind
+        +list runs
+        +int gap
+    }
+    class Renderer {
+        <<walker>>
+        +render(tree, buffer)
+    }
+    Renderer --> "many" PrintItem : appends
+```
+
+```mermaid
+erDiagram
+    DOCUMENT ||--o{ BLOCK : contains
+    BLOCK ||--|{ RUN : "is made of"
+    DOCUMENT {
+        string path
+        string title
+    }
+```
+
+A diagram type this viewer doesn't draw falls back to the code block, so
+the source stays readable rather than being silently dropped:
+
+```mermaid
+gantt
+    title Not drawn
+    section One
+    Task :a1, 2026-01-01, 30d
+```
+
 ## Links
 
 A regular [link to example.com](https://example.com) and an explicit

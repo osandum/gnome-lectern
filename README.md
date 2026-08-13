@@ -13,6 +13,10 @@ function](data/screenshots/01-reading.png)
 
 - Full CommonMark + GFM: tables, fenced code with syntax highlighting,
   task lists, footnotes, images.
+- Mermaid diagrams — `flowchart`/`graph`, `sequenceDiagram`,
+  `classDiagram` and `erDiagram` are drawn (and printed) natively, with
+  no browser involved. Any other diagram type, or syntax outside the
+  supported subset, stays a highlighted code block.
 - Native GTK4/Libadwaita rendering (a single `Gtk.TextView` + tags) —
   no embedded browser engine.
 - Find bar, zoom, printing, auto-reload when the file changes on disk.
@@ -88,7 +92,9 @@ in `XDG_RUNTIME_DIR` and connects anyway.
 
 v1. Known scope cuts: table column widths are a simple
 median-character-count heuristic rather than true
-text-measurement-based sizing, highlighting for undeclared/obscure
+text-measurement-based sizing, mermaid support is a deliberate subset
+(no `subgraph`, and the layout is a cut-down dagre rather than the real
+one), highlighting for undeclared/obscure
 fenced-code languages is best-effort, images don't scale with zoom, and
 an image sitting *inside* a paragraph prints above that paragraph rather
 than within it (on screen it's positioned correctly).

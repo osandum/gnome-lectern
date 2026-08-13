@@ -45,9 +45,10 @@ def _without_trailing_newline(runs):
 
 
 class PrintItem:
-    __slots__ = ("kind", "runs", "block_tags", "rows", "language", "image", "gap")
+    __slots__ = ("kind", "runs", "block_tags", "rows", "language", "image", "gap", "diagram")
 
-    def __init__(self, kind, runs=None, block_tags=None, rows=None, language=None, image=None):
+    def __init__(self, kind, runs=None, block_tags=None, rows=None, language=None,
+                 image=None, diagram=None):
         self.kind = kind
         self.runs = runs or []
         self.block_tags = block_tags or []
@@ -64,6 +65,12 @@ class PrintItem:
         # texture at print time rather than at render time, so an image
         # the reader loaded after opening the document still prints.
         self.image = image
+        # For "diagram": the parsed mermaid model, *not* the on-screen
+        # scene. Paper and screen lay a diagram out with different fonts
+        # (see printing._base_font), and a scene is only valid for the
+        # font it was measured with, so print re-lays it out from the
+        # model rather than scaling the screen's geometry.
+        self.diagram = diagram
 
 
 class RenderCtx:
@@ -129,10 +136,17 @@ class MarkdownRenderer:
         # images.ImageView per rendered image, for window.py to width-sync
         # and (for http(s) ones) to load on demand.
         self.images = []
+        # mermaid.DiagramView per drawn diagram. Width-synced and zoomed
+        # by window.py the same way images are.
+        self.diagrams = []
         self._footnote_ref_marks = {}   # label -> mark name
         self._footnote_def_marks = {}   # label -> mark name
         self._pending_anchors = []      # (anchor, widget) drained by caller
         self._instance_counter = 0
+        # Set by a block that needs different outside-the-text-box padding
+        # from its node type's default, read and cleared by
+        # _walk_block_node right after dispatch.
+        self._block_padding_override = None
         self._prev_block_bottom = None
         self._prev_block_padding = 0
         self._link_color = tagdefs.link_color_hex(dark=False)  # overwritten by render()
@@ -230,14 +244,21 @@ class MarkdownRenderer:
         start_mark = buffer.create_mark(None, it, True) if prev_bottom is not None else None
         first_item = len(self.print_model)
         self._dispatch_block_node(t, child, buffer, it, ctx)
+        # A fence normally reserves room for the code panel painted around
+        # it; one drawn as a mermaid diagram has no panel, and says so by
+        # setting the override (see _emit_diagram).
+        padding = self._BLOCK_PADDING.get(t, 0)
+        if self._block_padding_override is not None:
+            padding = self._block_padding_override
+            self._block_padding_override = None
         if start_mark is not None:
             gap = max(prev_bottom, self._BLOCK_TOP_MARGIN.get(t, 0))
-            gap += prev_padding + self._BLOCK_PADDING.get(t, 0)
+            gap += prev_padding + padding
             self._apply_gap(buffer, start_mark, gap)
             self._record_print_gap(first_item, gap)
         self._prev_block_bottom = self._block_bottom_margin(child)
         if t not in self._CONTAINER_BLOCKS:
-            self._prev_block_padding = self._BLOCK_PADDING.get(t, 0)
+            self._prev_block_padding = padding
 
     def _dispatch_block_node(self, t, child, buffer, it, ctx):
         if t == "heading":
@@ -370,6 +391,8 @@ class MarkdownRenderer:
         info = (node.info or "").strip()
         language = info.split()[0] if info else None
         code = node.content
+        if language and language.lower() == "mermaid" and self._emit_diagram(code, buffer, it, ctx):
+            return
         runs = []
         for text, pyg_tag in highlighting.highlight_runs(code, language):
             run_tags = ["code-block"] + ([pyg_tag] if pyg_tag else [])
@@ -385,6 +408,39 @@ class MarkdownRenderer:
             PrintItem("code-block", runs=_without_trailing_newline(runs),
                       block_tags=list(ctx.block_tags), language=language)
         )
+
+    def _emit_diagram(self, code, buffer, it, ctx):
+        """Draw a ```mermaid fence as a diagram. False means "couldn't",
+        and the caller emits the fence as an ordinary code block.
+
+        The import is deferred rather than made at module level for the
+        same reason document.py defers markdown-it: a document with no
+        diagrams in it shouldn't pay to import cairo and PangoCairo, and
+        most documents have none.
+        """
+        from . import mermaid
+        try:
+            diagram = mermaid.parse(code)
+            scene = mermaid.build_scene(diagram, mermaid.ui_font())
+        except mermaid.Unsupported:
+            return False
+        except Exception:
+            # A viewer must not fail to open a document because one
+            # diagram in it tripped over a bug in this layout code. The
+            # code-block fallback still shows the reader the source.
+            return False
+        view = mermaid.DiagramView(scene, mermaid.ui_font())
+        # No code panel is painted around a diagram, so it doesn't need
+        # the room a fence otherwise reserves for one.
+        self._block_padding_override = 0
+        anchor = buffer.create_child_anchor(it)
+        self._pending_anchors.append((anchor, view))
+        self.diagrams.append(view)
+        buffer.insert(it, "\n")
+        self.print_model.append(
+            PrintItem("diagram", diagram=diagram, block_tags=list(ctx.block_tags))
+        )
+        return True
 
     def _emit_hr(self, buffer, it, ctx):
         anchor = buffer.create_child_anchor(it)
