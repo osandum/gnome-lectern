@@ -91,6 +91,17 @@ Beware of concluding otherwise from unsetting `DISPLAY` and
 `WAYLAND_DISPLAY`: GDK then falls back to the default `wayland-0` socket
 in `XDG_RUNTIME_DIR` and connects anyway.
 
+## Claude Code integration
+
+If you use [Claude Code](https://claude.com/claude-code), `contrib/claude-code/`
+has a skill that teaches it to open generated Markdown deliverables — reports,
+summaries, plans — in Lectern as it writes them, instead of just naming the
+file path. Install it globally:
+
+```sh
+cp -r contrib/claude-code/skills/open-with-lectern ~/.claude/skills/
+```
+
 ## Status
 
 v0.2.0. Known scope cuts: table column widths are a simple
