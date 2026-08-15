@@ -79,6 +79,33 @@
   </requires>
 
   <releases>
+    <release version="0.3.0" date="2026-08-15">
+      <description>
+        <p>
+          Printing gains proper page margins and an optional header and
+          footer, toggled from the hamburger menu. Pagination now keeps a
+          heading with the section it introduces and avoids stranding a
+          single line at the top or bottom of a page.
+        </p>
+        <p>
+          Copying a selection now puts rich HTML and Markdown on the
+          clipboard alongside plain text, so pasting into an editor like
+          Thunderbird or a word processor keeps formatting, tables,
+          images and diagrams intact rather than flattening everything to
+          plain text.
+        </p>
+        <p>
+          Lectern is now translatable, and ships with translations for
+          Danish, Spanish, German, French, Italian, Portuguese, Japanese,
+          Chinese (Simplified), Korean, Finnish, Swedish and Norwegian
+          Bokmål.
+        </p>
+        <p>
+          The About dialog shows the app's own icon instead of a generic
+          placeholder.
+        </p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-08-13">
       <description>
         <p>
