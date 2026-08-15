@@ -11,15 +11,18 @@ print item, and print_model carries no buffer offsets to slice by, so
 there's nothing to reuse there; tag names are the one place formatting
 lives on screen, so that's what gets walked here too.
 
-Scope cut, deliberately: tables and mermaid diagrams. A table lives in
-the buffer as a single object-replacement character (see
-MarkdownRenderer.tables), and reconstructing one from that would need
-its own serializer -- table cells are already separately, natively
-copyable (each is its own selectable Gtk.Label, which binds Ctrl+C
-itself; see tables.py), so this isn't a functionality gap, just a
-narrower one than "everything". A diagram has no reasonable text form
-at all. Both are silently skipped, like renderer.py's own "v1 scope
-cut" for raw HTML.
+Scope cut, deliberately: mermaid diagrams. A diagram has no reasonable
+text form at all, and is silently skipped, like renderer.py's own "v1
+scope cut" for raw HTML. A table *is* reconstructed (a real <table> /
+GFM pipe table) from the plain-text grid MarkdownRenderer.
+anchor_descriptors carries for it -- the buffer itself only holds a
+single object-replacement character standing in for the whole thing,
+same as a diagram, but a table's cell text is readily available
+outside the buffer where a diagram's picture just isn't. Each cell is
+also already separately, natively copyable on its own (every cell is
+a selectable Gtk.Label, which binds Ctrl+C itself; see tables.py) --
+this module's reconstruction is for a selection spanning the *whole*
+table, not a replacement for that.
 """
 import html as html_lib
 import re
@@ -250,6 +253,28 @@ def _html_escape(text):
     return html_lib.escape(text, quote=False)
 
 
+def _padded_rows(rows):
+    """`rows`, every row padded out to the widest one with empty cells
+    -- ragged input is possible (column_char_weights in tables.py
+    tolerates it too), and a pipe table/<table> both need a rectangular
+    grid."""
+    width = max((len(row) for row in rows), default=0)
+    return [row + [""] * (width - len(row)) for row in rows]
+
+
+def _table_html(rows):
+    rows = _padded_rows(rows)
+    if not rows:
+        return ""
+    head, body = rows[0], rows[1:]
+    thead = "<tr>" + "".join(f"<th>{_html_escape(c)}</th>" for c in head) + "</tr>"
+    tbody = "".join(
+        "<tr>" + "".join(f"<td>{_html_escape(c)}</td>" for c in row) + "</tr>"
+        for row in body
+    )
+    return f"<table><thead>{thead}</thead><tbody>{tbody}</tbody></table>"
+
+
 def _anchor_html(anchor, descriptors):
     info = descriptors.get(anchor)
     kind = info["kind"] if info else None
@@ -257,7 +282,9 @@ def _anchor_html(anchor, descriptors):
         return "<hr>"
     if kind == "image":
         return f'<img src="{_html_escape(info["src"])}" alt="{_html_escape(info["alt"])}">'
-    return ""  # table/diagram: see module docstring
+    if kind == "table":
+        return _table_html(info["rows"])
+    return ""  # diagram: see module docstring
 
 
 def _html_layers(styles, link_id):
@@ -334,6 +361,30 @@ def _md_code_fence(text):
     return "`" * max(3, longest + 1)
 
 
+def _md_table_cell(text):
+    # _md_escape already backslash-escapes a literal backslash, so it's
+    # safe to escape "|" (not one of _md_escape's own characters, a
+    # pipe table's own delimiter rather than markdown's) afterwards
+    # without risking a double-escape. GFM table cells can't contain a
+    # real line break either.
+    return _md_escape(text).replace("|", "\\|").replace("\n", " ")
+
+
+def _table_markdown(rows):
+    rows = _padded_rows(rows)
+    if not rows:
+        return ""
+    escaped = [[_md_table_cell(cell) for cell in row] for row in rows]
+    widths = [max(3, max(len(row[i]) for row in escaped)) for i in range(len(escaped[0]))]
+
+    def format_row(row):
+        return "| " + " | ".join(cell.ljust(width) for cell, width in zip(row, widths)) + " |"
+
+    lines = [format_row(escaped[0]), "| " + " | ".join("-" * w for w in widths) + " |"]
+    lines.extend(format_row(row) for row in escaped[1:])
+    return "\n".join(lines)
+
+
 def _anchor_markdown(anchor, descriptors):
     info = descriptors.get(anchor)
     kind = info["kind"] if info else None
@@ -341,7 +392,9 @@ def _anchor_markdown(anchor, descriptors):
         return "---"
     if kind == "image":
         return f'![{info["alt"]}]({info["src"]})'
-    return ""  # table/diagram: see module docstring
+    if kind == "table":
+        return _table_markdown(info["rows"])
+    return ""  # diagram: see module docstring
 
 
 # Delimiter-based styles participate in a cross-run open/close stack
@@ -454,6 +507,16 @@ def _html_line_body(line, marker, dispatch_targets, anchor_descriptors):
     if line.kind == "code-block":
         text = "".join(r[1] for r in runs if r[0] == "text")
         return f"<pre><code>{_html_escape(text)}</code></pre>"
+    if len(runs) == 1 and runs[0][0] == "anchor":
+        # hr and table are block-level on their own -- <table>/<hr>
+        # inside a <p> is invalid HTML (browsers silently fix it up,
+        # but there's no reason to hand them broken markup to begin
+        # with). An image anchor falls through to the <p> case below
+        # instead: images are inline, and one alone in its own
+        # paragraph is exactly how CommonMark itself renders it.
+        kind = anchor_descriptors.get(runs[0][1], {}).get("kind")
+        if kind in ("hr", "table"):
+            return _anchor_html(runs[0][1], anchor_descriptors)
     inline = _inline_html(runs, dispatch_targets, anchor_descriptors)
     tag = _HTML_HEADING_TAGS.get(line.kind)
     if tag:

@@ -177,6 +177,7 @@ def test_blockquote_gets_quote_marker_and_wrapper():
 def test_hr_anchor():
     html, md = to_html_and_markdown("before\n\n---\n\nafter\n")
     assert "<hr>" in html
+    assert "<p><hr></p>" not in html  # hr is block-level -- invalid inside a <p>
     assert "---" in md
 
 
@@ -184,6 +185,51 @@ def test_inline_image_anchor():
     html, md = to_html_and_markdown("before ![a dot](dot.png) after\n")
     assert '<img src="dot.png" alt="a dot">' in html
     assert "![a dot](dot.png)" in md
+
+
+def test_image_alone_in_its_own_paragraph_still_gets_a_p_wrapper():
+    # Unlike hr/table, an image is inline -- CommonMark itself renders
+    # one alone in its own paragraph inside a <p>.
+    html, _md = to_html_and_markdown("![a dot](dot.png)\n")
+    assert '<p><img src="dot.png" alt="a dot"></p>' in html
+
+
+# -- tables --------------------------------------------------------------
+
+def test_table_becomes_a_real_table_in_html():
+    html, _md = to_html_and_markdown(
+        "| Feature | Supported |\n| --- | --- |\n| Tables | Yes |\n"
+    )
+    assert "<table><thead><tr><th>Feature</th><th>Supported</th></tr></thead>" in html
+    assert "<tbody><tr><td>Tables</td><td>Yes</td></tr></tbody></table>" in html
+    assert "<p><table>" not in html  # table is block-level too
+
+
+def test_table_becomes_a_pipe_table_in_markdown():
+    _html, md = to_html_and_markdown(
+        "| Feature | Supported |\n| --- | --- |\n| Tables | Yes |\n"
+    )
+    lines = md.strip().splitlines()
+    assert lines[0].startswith("| Feature")
+    assert set(lines[1].replace("|", "").strip()) <= {"-", " "}
+    assert "| Tables" in lines[2]
+
+
+def test_table_cell_pipe_is_escaped_in_markdown():
+    _html, md = to_html_and_markdown(
+        "| A | B |\n| --- | --- |\n| has \\| pipe | plain |\n"
+    )
+    assert "has \\| pipe" in md
+
+
+def test_table_between_paragraphs_does_not_absorb_them():
+    html, md = to_html_and_markdown(
+        "Before.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nAfter.\n"
+    )
+    assert "<p>Before.</p>" in html
+    assert "<p>After.</p>" in html
+    assert "Before." not in html.split("<table>")[1]
+    assert "Before." in md and "After." in md
 
 
 # -- footnotes ----------------------------------------------------------------

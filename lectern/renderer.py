@@ -464,12 +464,12 @@ class MarkdownRenderer:
         anchor = buffer.create_child_anchor(it)
         self.tables.append((anchor, cells))
         self._pending_anchors.append((anchor, widget))
-        # "kind" only, no row data -- a copied selection spanning a table
-        # skips it rather than reconstructing one (see clipboard.py).
-        # Table cells are separately, natively copyable already: each is
-        # its own selectable Gtk.Label, which binds Ctrl+C itself (see
-        # tables.py).
-        self.anchor_descriptors[anchor] = {"kind": "table"}
+        # `rows` is the same plain-text grid print_model gets below --
+        # clipboard.py reconstructs a real <table>/GFM pipe table from
+        # it when a selection spans this anchor, rather than the cell
+        # markup each cell's own separately-copyable Gtk.Label carries
+        # (see tables.py's build_table_widget docstring).
+        self.anchor_descriptors[anchor] = {"kind": "table", "rows": rows}
         buffer.insert(it, "\n")
         self.print_model.append(PrintItem("table", rows=rows, block_tags=list(ctx.block_tags)))
 
