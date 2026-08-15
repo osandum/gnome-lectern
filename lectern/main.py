@@ -11,6 +11,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, Gio
 
 from . import __version__
+from .i18n import _
 from .window import LecternWindow
 
 APPLICATION_ID = "io.github.osandum.Lectern"
@@ -70,7 +71,7 @@ class LecternApplication(Adw.Application):
             version=__version__,
             developer_name="Lectern contributors",
             license_type=Gtk.License.GPL_2_0,
-            comments="A read-only, Papers-style Markdown viewer.",
+            comments=_("A read-only, Papers-style Markdown viewer."),
             website="https://github.com/osandum/lectern",
         )
         about.present(self.get_active_window())

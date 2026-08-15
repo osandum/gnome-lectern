@@ -1,0 +1,14 @@
+# One language code per line (e.g. "da", "pt_BR") for each translation
+# under this directory -- see README.md for how to add one.
+da
+es
+de
+fr
+it
+pt
+ja
+zh_CN
+ko
+fi
+sv
+nb

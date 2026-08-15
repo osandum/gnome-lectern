@@ -21,6 +21,7 @@ from gi.repository import GLib, Gtk, Gdk, Pango, PangoCairo
 from . import tags as tagdefs
 from . import tables as tabledefs
 from . import zoom as zoomdefs
+from .i18n import _
 
 # Screen pixels are nominally 96dpi; print units are 72dpi points. Every
 # length tags.py and renderer.py express is in those pixels, so it has to
@@ -1062,7 +1063,9 @@ class PrintCoordinator:
                 HEADER_TEXT_TOP_PT, state["width"],
             )
             footer_y = state["height"] - FOOTER_BAND_PT + FOOTER_TEXT_TOP_PT
-            page_label = f"Page {page_nr + 1} of {len(state['pages'])}"
+            page_label = _("Page {page} of {total}").format(
+                page=page_nr + 1, total=len(state["pages"]),
+            )
             _draw_header_footer_line(
                 cr, context, font, None, page_label, footer_y, state["width"],
             )

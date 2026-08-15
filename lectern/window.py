@@ -8,6 +8,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, Gio, GLib, Gdk
 
 from . import tags as tagdefs
+from .i18n import _, ngettext
 from .document import Document, DocumentLoadError
 from .renderer import MarkdownRenderer
 from .findbar import FindController
@@ -49,7 +50,7 @@ class LecternWindow(Adw.ApplicationWindow):
         # shouldn't tell whoever hosts its images that you opened it, and
         # a per-image URL is a serviceable read receipt. This banner is
         # the opt-in, per document.
-        self._remote_images_banner = Adw.Banner(button_label="Load")
+        self._remote_images_banner = Adw.Banner(button_label=_("Load"))
         self._remote_images_banner.connect("button-clicked", self._on_load_remote_images)
         self._toolbar_view.add_top_bar(self._remote_images_banner)
 
@@ -66,17 +67,17 @@ class LecternWindow(Adw.ApplicationWindow):
         self._window_title = Adw.WindowTitle(title="Lectern")
         header.set_title_widget(self._window_title)
 
-        self._find_toggle = Gtk.ToggleButton(icon_name="edit-find-symbolic", tooltip_text="Find")
+        self._find_toggle = Gtk.ToggleButton(icon_name="edit-find-symbolic", tooltip_text=_("Find"))
         self._find_toggle.connect("toggled", self._on_find_toggled)
         header.pack_start(self._find_toggle)
 
         menu = Gio.Menu()
-        menu.append("Print…", "win.print-doc")
-        menu.append("Header and Footer When Printing", "win.print-header-footer")
-        menu.append("Document Properties", "win.properties")
-        menu.append("Keyboard Shortcuts", "win.show-help-overlay")
-        menu.append("About Lectern", "app.about")
-        menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", tooltip_text="Main Menu")
+        menu.append(_("Print…"), "win.print-doc")
+        menu.append(_("Header and Footer When Printing"), "win.print-header-footer")
+        menu.append(_("Document Properties"), "win.properties")
+        menu.append(_("Keyboard Shortcuts"), "win.show-help-overlay")
+        menu.append(_("About Lectern"), "app.about")
+        menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", tooltip_text=_("Main Menu"))
         menu_button.set_menu_model(menu)
         header.pack_end(menu_button)
         return header
@@ -134,7 +135,7 @@ class LecternWindow(Adw.ApplicationWindow):
         self._scrolled.add_controller(scroll_ctrl)
 
     def _build_findbar_widget(self):
-        self._search_entry = Gtk.SearchEntry(placeholder_text="Find in document")
+        self._search_entry = Gtk.SearchEntry(placeholder_text=_("Find in document"))
         self._search_entry.set_hexpand(True)
         self._search_entry.connect("search-changed", self._on_search_changed)
         self._search_entry.connect("activate", self._on_find_activate)
@@ -142,20 +143,20 @@ class LecternWindow(Adw.ApplicationWindow):
         key_ctrl.connect("key-pressed", self._on_find_key)
         self._search_entry.add_controller(key_ctrl)
 
-        self._find_word = Gtk.ToggleButton(label="Whole word", tooltip_text="Match whole word only")
+        self._find_word = Gtk.ToggleButton(label=_("Whole word"), tooltip_text=_("Match whole word only"))
         self._find_word.connect("toggled", self._on_find_options_changed)
-        self._find_case = Gtk.ToggleButton(label="Case", tooltip_text="Case sensitive")
+        self._find_case = Gtk.ToggleButton(label=_("Case"), tooltip_text=_("Case sensitive"))
         self._find_case.connect("toggled", self._on_find_options_changed)
 
-        prev_btn = Gtk.Button(icon_name="go-up-symbolic", tooltip_text="Previous match")
+        prev_btn = Gtk.Button(icon_name="go-up-symbolic", tooltip_text=_("Previous match"))
         prev_btn.connect("clicked", lambda b: self._advance_find(-1))
-        next_btn = Gtk.Button(icon_name="go-down-symbolic", tooltip_text="Next match")
+        next_btn = Gtk.Button(icon_name="go-down-symbolic", tooltip_text=_("Next match"))
         next_btn.connect("clicked", lambda b: self._advance_find(1))
 
         self._find_label = Gtk.Label(label="")
         self._find_label.add_css_class("dim-label")
 
-        close_btn = Gtk.Button(icon_name="window-close-symbolic", tooltip_text="Close")
+        close_btn = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=_("Close"))
         close_btn.connect("clicked", lambda b: self._find_toggle.set_active(False))
 
         inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -176,9 +177,9 @@ class LecternWindow(Adw.ApplicationWindow):
         return self._find_revealer
 
     def _build_zoom_widget(self):
-        zoom_out_btn = Gtk.Button(icon_name="zoom-out-symbolic", tooltip_text="Zoom out")
+        zoom_out_btn = Gtk.Button(icon_name="zoom-out-symbolic", tooltip_text=_("Zoom out"))
         zoom_out_btn.connect("clicked", lambda b: self._zoom.zoom_out())
-        zoom_in_btn = Gtk.Button(icon_name="zoom-in-symbolic", tooltip_text="Zoom in")
+        zoom_in_btn = Gtk.Button(icon_name="zoom-in-symbolic", tooltip_text=_("Zoom in"))
         zoom_in_btn.connect("clicked", lambda b: self._zoom.zoom_in())
         self._zoom_label = Gtk.Label(label="100%")
         self._zoom_label.set_width_chars(5)
@@ -280,16 +281,18 @@ class LecternWindow(Adw.ApplicationWindow):
         if self._document is None:
             return
         dialog = Adw.AlertDialog(
-            heading="Document Properties",
-            body=(
-                f"Name: {self._document.basename}\n"
-                f"Location: {self._document.parent_path or '—'}\n"
-                f"Size: {self._document.size_bytes():,} bytes\n"
-                f"Words: {self._document.word_count():,}\n"
-                f"Est. reading time: {self._document.reading_time_minutes()} min"
-            ),
+            heading=_("Document Properties"),
+            body="\n".join([
+                _("Name: {name}").format(name=self._document.basename),
+                _("Location: {location}").format(location=self._document.parent_path or "—"),
+                _("Size: {size} bytes").format(size=f"{self._document.size_bytes():,}"),
+                _("Words: {count}").format(count=f"{self._document.word_count():,}"),
+                _("Est. reading time: {minutes} min").format(
+                    minutes=self._document.reading_time_minutes()
+                ),
+            ]),
         )
-        dialog.add_response("ok", "OK")
+        dialog.add_response("ok", _("OK"))
         dialog.present(self)
 
     # -- find bar wiring -----------------------------------------------
@@ -333,7 +336,9 @@ class LecternWindow(Adw.ApplicationWindow):
 
     def _sync_find_label(self):
         count = self._find.match_count
-        text = f"{self._find.current_position} / {count}" if count else "No matches"
+        text = _("{position} / {count}").format(
+            position=self._find.current_position, count=count
+        ) if count else _("No matches")
         self._find_label.set_text(text if self._search_entry.get_text() else "")
 
     # -- remote images ----------------------------------------------------
@@ -343,9 +348,12 @@ class LecternWindow(Adw.ApplicationWindow):
         self._remote_images_banner.set_revealed(bool(pending))
         if pending:
             count = len(pending)
-            noun = "image" if count == 1 else "images"
             self._remote_images_banner.set_title(
-                f"This document contains {count} remote {noun}, not loaded"
+                ngettext(
+                    "This document contains {count} remote image, not loaded",
+                    "This document contains {count} remote images, not loaded",
+                    count,
+                ).format(count=count)
             )
 
     def _on_load_remote_images(self, banner):
@@ -450,7 +458,7 @@ class LecternWindow(Adw.ApplicationWindow):
         try:
             Gio.AppInfo.launch_default_for_uri(target_uri, None)
         except GLib.Error:
-            self._toast_overlay.add_toast(Adw.Toast(title="Couldn’t open link", timeout=3))
+            self._toast_overlay.add_toast(Adw.Toast(title=_("Couldn’t open link"), timeout=3))
 
     def _on_table_link_activated(self, label, uri):
         self._open_href(uri)
@@ -479,11 +487,11 @@ class LecternWindow(Adw.ApplicationWindow):
 
     def _show_empty_state(self):
         status = Adw.StatusPage(
-            title="No Document",
-            description="Open a Markdown file to view it here.",
+            title=_("No Document"),
+            description=_("Open a Markdown file to view it here."),
             icon_name="text-x-generic-symbolic",
         )
-        open_button = Gtk.Button(label="Open File…", halign=Gtk.Align.CENTER)
+        open_button = Gtk.Button(label=_("Open File…"), halign=Gtk.Align.CENTER)
         open_button.add_css_class("suggested-action")
         open_button.add_css_class("pill")
         open_button.connect("clicked", self._on_open_clicked)
@@ -491,8 +499,8 @@ class LecternWindow(Adw.ApplicationWindow):
         self._content_overlay.set_child(status)
 
     def _on_open_clicked(self, button):
-        dialog = Gtk.FileDialog(title="Open Markdown File")
-        filter_md = Gtk.FileFilter(name="Markdown files")
+        dialog = Gtk.FileDialog(title=_("Open Markdown File"))
+        filter_md = Gtk.FileFilter(name=_("Markdown files"))
         filter_md.add_pattern("*.md")
         filter_md.add_pattern("*.markdown")
         filters = Gio.ListStore.new(Gtk.FileFilter)
@@ -544,7 +552,7 @@ class LecternWindow(Adw.ApplicationWindow):
 
     def _show_load_error(self, message):
         status = Adw.StatusPage(
-            title="Couldn’t Open File", description=message, icon_name="dialog-error-symbolic"
+            title=_("Couldn’t Open File"), description=message, icon_name="dialog-error-symbolic"
         )
         self._content_overlay.set_child(status)
 
@@ -594,10 +602,10 @@ class LecternWindow(Adw.ApplicationWindow):
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(restore_scroll)
-        self._toast_overlay.add_toast(Adw.Toast(title="Reloaded", timeout=2))
+        self._toast_overlay.add_toast(Adw.Toast(title=_("Reloaded"), timeout=2))
 
     def _on_file_missing(self, watcher):
-        self._toast_overlay.add_toast(Adw.Toast(title="File no longer available", timeout=3))
+        self._toast_overlay.add_toast(Adw.Toast(title=_("File no longer available"), timeout=3))
 
     def _on_dark_changed(self, style_manager, pspec):
         if self._textview.get_buffer() is not None:

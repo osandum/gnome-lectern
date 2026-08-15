@@ -1,0 +1,232 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR Ole Sandum
+# This file is distributed under the same license as the lectern package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: lectern 0.2.0\n"
+"Report-Msgid-Bugs-To: https://github.com/osandum/lectern/issues\n"
+"POT-Creation-Date: 2026-08-15 17:46+0200\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
+
+#: lectern/document.py:88
+#, python-brace-format
+msgid "Could not read {path}"
+msgstr ""
+
+#: lectern/images.py:93
+msgid "Remote image not loaded"
+msgstr ""
+
+#: lectern/images.py:112
+msgid "Loading…"
+msgstr ""
+
+#: lectern/images.py:115
+msgid "Bad image URL"
+msgstr ""
+
+#: lectern/images.py:141
+msgid "Image not found"
+msgstr ""
+
+#: lectern/images.py:146
+msgid "Couldn’t load image"
+msgstr ""
+
+#: lectern/images.py:152
+msgid "Couldn’t fetch image"
+msgstr ""
+
+#: lectern/images.py:156
+#, python-brace-format
+msgid "Image request failed ({status})"
+msgstr ""
+
+#: lectern/images.py:159
+msgid "Empty image response"
+msgstr ""
+
+#: lectern/images.py:162
+msgid "Image too large"
+msgstr ""
+
+#: lectern/images.py:167
+msgid "Couldn’t decode image"
+msgstr ""
+
+#: lectern/images.py:199
+#, python-brace-format
+msgid "{reason}: {src}"
+msgstr ""
+
+#: lectern/main.py:74
+msgid "A read-only, Papers-style Markdown viewer."
+msgstr ""
+
+#: lectern/printing.py:1066
+#, python-brace-format
+msgid "Page {page} of {total}"
+msgstr ""
+
+#: lectern/window.py:53
+msgid "Load"
+msgstr ""
+
+#: lectern/window.py:70
+msgid "Find"
+msgstr ""
+
+#: lectern/window.py:75
+msgid "Print…"
+msgstr ""
+
+#: lectern/window.py:76
+msgid "Header and Footer When Printing"
+msgstr ""
+
+#: lectern/window.py:77 lectern/window.py:284
+msgid "Document Properties"
+msgstr ""
+
+#: lectern/window.py:78
+msgid "Keyboard Shortcuts"
+msgstr ""
+
+#: lectern/window.py:79
+msgid "About Lectern"
+msgstr ""
+
+#: lectern/window.py:80
+msgid "Main Menu"
+msgstr ""
+
+#: lectern/window.py:138
+msgid "Find in document"
+msgstr ""
+
+#: lectern/window.py:146
+msgid "Whole word"
+msgstr ""
+
+#: lectern/window.py:146
+msgid "Match whole word only"
+msgstr ""
+
+#: lectern/window.py:148
+msgid "Case"
+msgstr ""
+
+#: lectern/window.py:148
+msgid "Case sensitive"
+msgstr ""
+
+#: lectern/window.py:151
+msgid "Previous match"
+msgstr ""
+
+#: lectern/window.py:153
+msgid "Next match"
+msgstr ""
+
+#: lectern/window.py:159
+msgid "Close"
+msgstr ""
+
+#: lectern/window.py:180
+msgid "Zoom out"
+msgstr ""
+
+#: lectern/window.py:182
+msgid "Zoom in"
+msgstr ""
+
+#: lectern/window.py:286
+#, python-brace-format
+msgid "Name: {name}"
+msgstr ""
+
+#: lectern/window.py:287
+#, python-brace-format
+msgid "Location: {location}"
+msgstr ""
+
+#: lectern/window.py:288
+#, python-brace-format
+msgid "Size: {size} bytes"
+msgstr ""
+
+#: lectern/window.py:289
+#, python-brace-format
+msgid "Words: {count}"
+msgstr ""
+
+#: lectern/window.py:290
+#, python-brace-format
+msgid "Est. reading time: {minutes} min"
+msgstr ""
+
+#: lectern/window.py:295
+msgid "OK"
+msgstr ""
+
+#: lectern/window.py:339
+#, python-brace-format
+msgid "{position} / {count}"
+msgstr ""
+
+#: lectern/window.py:341
+msgid "No matches"
+msgstr ""
+
+#: lectern/window.py:353
+#, python-brace-format
+msgid "This document contains {count} remote image, not loaded"
+msgid_plural "This document contains {count} remote images, not loaded"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lectern/window.py:461
+msgid "Couldn’t open link"
+msgstr ""
+
+#: lectern/window.py:490
+msgid "No Document"
+msgstr ""
+
+#: lectern/window.py:491
+msgid "Open a Markdown file to view it here."
+msgstr ""
+
+#: lectern/window.py:494
+msgid "Open File…"
+msgstr ""
+
+#: lectern/window.py:502
+msgid "Open Markdown File"
+msgstr ""
+
+#: lectern/window.py:503
+msgid "Markdown files"
+msgstr ""
+
+#: lectern/window.py:555
+msgid "Couldn’t Open File"
+msgstr ""
+
+#: lectern/window.py:605
+msgid "Reloaded"
+msgstr ""
+
+#: lectern/window.py:608
+msgid "File no longer available"
+msgstr ""

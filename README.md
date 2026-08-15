@@ -91,6 +91,11 @@ Beware of concluding otherwise from unsetting `DISPLAY` and
 `WAYLAND_DISPLAY`: GDK then falls back to the default `wayland-0` socket
 in `XDG_RUNTIME_DIR` and connects anyway.
 
+## Translating
+
+See [`po/README.md`](po/README.md) for how to add or update a
+translation.
+
 ## Claude Code integration
 
 If you use [Claude Code](https://claude.com/claude-code), `contrib/claude-code/`
