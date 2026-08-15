@@ -3,11 +3,14 @@ harness as test_renderer.py), select a range, and check the HTML and
 Markdown it serializes to. Headless -- Gtk.TextBuffer manipulation needs
 GTK initialized, not a realized/displayed window.
 """
+import base64
+
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gio", "2.0")
-from gi.repository import Gtk, Gdk, GLib, Gio
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gtk, Gdk, GLib, Gio, GdkPixbuf
 import pytest
 
 from markdown_it.tree import SyntaxTreeNode
@@ -44,7 +47,6 @@ def to_html_and_markdown(markdown_text, offsets=None):
 
 
 def make_png(path, width=2, height=2):
-    from gi.repository import GdkPixbuf
     pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, width, height)
     pixbuf.fill(0xFF0000FF)
     pixbuf.savev(str(path), "png", [], [])
@@ -248,7 +250,6 @@ def test_remote_image_not_yet_loaded_yields_no_texture():
 
 
 def test_content_provider_with_a_texture_offers_image_png(tmp_path):
-    from gi.repository import GdkPixbuf
     make_png(tmp_path / "dot.png")
     texture = Gdk.Texture.new_from_filename(str(tmp_path / "dot.png"))
     provider = clipboard.make_content_provider("plain", "<p>html</p>", "md", texture)
@@ -333,6 +334,90 @@ def test_unloaded_remote_image_falls_back_to_its_src_reference():
         clipboard.walk_lines(buffer, start, end), renderer.dispatch_targets, renderer.anchor_descriptors,
     )
     assert 'src="https://example.com/pic.png"' in html
+
+
+# -- mermaid diagrams ---------------------------------------------------------
+
+_FLOWCHART = "```mermaid\nflowchart TD\n    A[Start] --> B[End]\n```\n"
+
+
+def _diagram_png_bytes(html):
+    marker = 'src="data:image/png;base64,'
+    start = html.index(marker) + len(marker)
+    end = html.index('"', start)
+    return base64.b64decode(html[start:end])
+
+
+def test_diagram_embeds_as_png_data_uri_in_html():
+    renderer, buffer = render(_FLOWCHART)
+    assert len(renderer.diagrams) == 1
+    start, end = buffer.get_bounds()
+    html, _md = clipboard.selection_to_html_and_markdown(
+        buffer, renderer.dispatch_targets, renderer.anchor_descriptors, start, end,
+    )
+    assert 'src="data:image/png;base64,' in html
+    png = _diagram_png_bytes(html)
+    loaded = GdkPixbuf.Pixbuf.new_from_stream(
+        Gio.MemoryInputStream.new_from_data(png, None), None,
+    )
+    assert loaded.get_width() > 0 and loaded.get_height() > 0
+
+
+def test_diagram_is_left_out_of_markdown_entirely():
+    renderer, buffer = render("Before.\n\n" + _FLOWCHART + "\nAfter.\n")
+    start, end = buffer.get_bounds()
+    _html, md = clipboard.selection_to_html_and_markdown(
+        buffer, renderer.dispatch_targets, renderer.anchor_descriptors, start, end,
+    )
+    assert "base64" not in md
+    assert "Before." in md and "After." in md
+
+
+def test_two_diagrams_each_get_their_own_data_uri():
+    renderer, buffer = render(_FLOWCHART + "\n" + _FLOWCHART)
+    assert len(renderer.diagrams) == 2
+    start, end = buffer.get_bounds()
+    html, _md = clipboard.selection_to_html_and_markdown(
+        buffer, renderer.dispatch_targets, renderer.anchor_descriptors, start, end,
+    )
+    assert html.count('src="data:image/png;base64,') == 2
+
+
+def test_diagram_renders_with_a_light_background_even_in_dark_mode():
+    tree = SyntaxTreeNode(_PARSER.parse(_FLOWCHART))
+    buffer = Gtk.TextBuffer(tag_table=create_tag_table(dark=True))
+    renderer = MarkdownRenderer()
+    renderer.render(tree, buffer, dark=True)
+    start, end = buffer.get_bounds()
+    html, _md = clipboard.selection_to_html_and_markdown(
+        buffer, renderer.dispatch_targets, renderer.anchor_descriptors, start, end,
+    )
+    png = _diagram_png_bytes(html)
+    loaded = GdkPixbuf.Pixbuf.new_from_stream(
+        Gio.MemoryInputStream.new_from_data(png, None), None,
+    )
+    # Most of a small flowchart's canvas is blank margin around a few
+    # small boxes, so a plain white pixel appearing *somewhere* is a
+    # robust proxy for "the background paint used white, not a dark
+    # theme's tone" -- without having to know which exact coordinate
+    # this particular diagram's layout leaves uncovered.
+    pixels = loaded.get_pixels()
+    channels = loaded.get_n_channels()
+    assert any(
+        pixels[i] == pixels[i + 1] == pixels[i + 2] == 255
+        for i in range(0, len(pixels) - channels, channels)
+    )
+
+
+def test_unsupported_diagram_falls_back_to_code_block_unaffected():
+    renderer, buffer = render("```mermaid\nnot a real diagram type\n```\n")
+    assert len(renderer.diagrams) == 0
+    start, end = buffer.get_bounds()
+    html, md = clipboard.selection_to_html_and_markdown(
+        buffer, renderer.dispatch_targets, renderer.anchor_descriptors, start, end,
+    )
+    assert "<pre><code>" in html
+    assert "not a real diagram type" in md
 
 
 # -- tables --------------------------------------------------------------

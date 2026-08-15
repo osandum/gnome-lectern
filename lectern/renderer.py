@@ -442,7 +442,10 @@ class MarkdownRenderer:
         self._block_padding_override = 0
         anchor = buffer.create_child_anchor(it)
         self._pending_anchors.append((anchor, view))
-        self.anchor_descriptors[anchor] = {"kind": "diagram"}
+        # `view` itself, not just "kind" -- clipboard.py rasterizes its
+        # already-built `.scene` to a PNG data URI, the same reasoning
+        # as reading a loaded image's live texture at copy time.
+        self.anchor_descriptors[anchor] = {"kind": "diagram", "view": view}
         self.diagrams.append(view)
         buffer.insert(it, "\n")
         self.print_model.append(

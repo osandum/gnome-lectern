@@ -1,10 +1,16 @@
 """Copy: put text/html and a text/markdown flavour on the clipboard
-alongside plain text -- and, when the selection is exactly one image,
-its actual pixels too (image/png) -- so pasting a Lectern selection
-into a rich-text-aware app (mail, chat, office) or a Markdown editor
-keeps its formatting. Gtk.TextView's default copy-clipboard handler
-only ever puts plain text on the clipboard, discarding every
-Gtk.TextTag.
+alongside plain text, so pasting a Lectern selection into a rich-text-
+aware app (mail, chat, office) or a Markdown editor keeps its
+formatting. Gtk.TextView's default copy-clipboard handler only ever
+puts plain text on the clipboard, discarding every Gtk.TextTag.
+
+Images and diagrams get their real pixels embedded as a data: URI
+directly in the HTML (any number of them, not just one -- see
+_image_data_uri/_diagram_data_uri), and a loaded image additionally
+gets its own image/png clipboard flavour when the selection is
+*exactly* one (make_content_provider's image_texture, for a paste
+target that only understands raw image data, not HTML at all -- no
+well-defined single image/* payload exists for more than one).
 
 Driven off the live Gtk.TextBuffer and its tags for the *selected
 range only* -- unlike printing.py, which works off the whole
@@ -13,21 +19,27 @@ print item, and print_model carries no buffer offsets to slice by, so
 there's nothing to reuse there; tag names are the one place formatting
 lives on screen, so that's what gets walked here too.
 
-Scope cut, deliberately: mermaid diagrams. A diagram has no reasonable
-text form at all, and is silently skipped, like renderer.py's own "v1
-scope cut" for raw HTML. A table *is* reconstructed (a real <table> /
-GFM pipe table) from the plain-text grid MarkdownRenderer.
-anchor_descriptors carries for it -- the buffer itself only holds a
-single object-replacement character standing in for the whole thing,
-same as a diagram, but a table's cell text is readily available
-outside the buffer where a diagram's picture just isn't. Each cell is
-also already separately, natively copyable on its own (every cell is
-a selectable Gtk.Label, which binds Ctrl+C itself; see tables.py) --
-this module's reconstruction is for a selection spanning the *whole*
-table, not a replacement for that.
+A table is reconstructed (a real <table> / GFM pipe table) from the
+plain-text grid MarkdownRenderer.anchor_descriptors carries for it --
+the buffer itself only holds a single object-replacement character
+standing in for the whole thing, but a table's cell text is readily
+available outside the buffer. Each cell is also already separately,
+natively copyable on its own (every cell is a selectable Gtk.Label,
+which binds Ctrl+C itself; see tables.py) -- this module's
+reconstruction is for a selection spanning the *whole* table, not a
+replacement for that.
+
+A mermaid diagram has no reasonable *text* form at all -- rasterized
+into a PNG data URI for HTML instead (same idea as an image's embedded
+pixels, see _diagram_data_uri), but left out of the Markdown flavour
+entirely: a bare base64 blob with no alt text worth keeping would only
+bloat what's supposed to be readable source, unlike HTML, where the
+src attribute is already URL-shaped machinery rather than human-facing
+text.
 """
 import base64
 import html as html_lib
+import math
 import re
 
 import gi
@@ -291,6 +303,43 @@ def _image_data_uri(view):
     return f"data:image/png;base64,{encoded}"
 
 
+def _diagram_data_uri(view):
+    """A data: URI rasterizing `view`'s already-built mermaid scene, or
+    None if it hasn't got a usable one. Cairo/mermaid are imported
+    here rather than at module level for the same reason renderer.py
+    defers them: most documents have no diagrams, and this only runs
+    at copy time regardless.
+
+    Always the light palette against a white background, regardless of
+    Lectern's current theme: this is content headed somewhere else
+    entirely (an email, a document), and the dark palette's light-on-
+    dark text would risk landing illegible against whatever background
+    the receiving app actually has, rather than the one it was drawn
+    for.
+    """
+    scene = view.scene if view is not None else None
+    if scene is None or scene.width <= 0 or scene.height <= 0:
+        return None
+    import io
+    import cairo
+    from . import mermaid
+    from . import tags as tagdefs
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, math.ceil(scene.width), math.ceil(scene.height))
+    cr = cairo.Context(surface)
+    cr.set_source_rgb(1, 1, 1)
+    cr.paint()
+    try:
+        mermaid.draw.draw_scene(cr, scene, tagdefs.diagram_palette(dark=False), mermaid.ui_font())
+    except Exception:
+        # Same reasoning as printing.py's _diagram_block: a diagram
+        # that trips over a layout bug here must not take the whole
+        # copy down with it.
+        return None
+    buf = io.BytesIO()
+    surface.write_to_png(buf)
+    return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('ascii')}"
+
+
 def _anchor_html(anchor, descriptors):
     info = descriptors.get(anchor)
     kind = info["kind"] if info else None
@@ -307,7 +356,10 @@ def _anchor_html(anchor, descriptors):
         return f'<img src="{src}" alt="{_html_escape(info["alt"])}">'
     if kind == "table":
         return _table_html(info["rows"])
-    return ""  # diagram: see module docstring
+    if kind == "diagram":
+        uri = _diagram_data_uri(info.get("view"))
+        return f'<img src="{uri}" alt="diagram">' if uri else ""
+    return ""
 
 
 def _html_layers(styles, link_id):
