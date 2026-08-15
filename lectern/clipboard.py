@@ -26,6 +26,7 @@ a selectable Gtk.Label, which binds Ctrl+C itself; see tables.py) --
 this module's reconstruction is for a selection spanning the *whole*
 table, not a replacement for that.
 """
+import base64
 import html as html_lib
 import re
 
@@ -277,13 +278,33 @@ def _table_html(rows):
     return f"<table><thead>{thead}</thead><tbody>{tbody}</tbody></table>"
 
 
+def _image_data_uri(view):
+    """A data: URI for `view`'s already-loaded pixels, or None if it
+    hasn't got any (a remote image the reader hasn't opted to fetch,
+    or one that failed) -- see the module docstring on why this beats
+    a src reference for *any* number of images, not just when the
+    selection is exactly one."""
+    texture = view.texture if view is not None else None
+    if texture is None:
+        return None
+    encoded = base64.b64encode(texture.save_to_png_bytes().get_data()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
 def _anchor_html(anchor, descriptors):
     info = descriptors.get(anchor)
     kind = info["kind"] if info else None
     if kind == "hr":
         return "<hr>"
     if kind == "image":
-        return f'<img src="{_html_escape(info["src"])}" alt="{_html_escape(info["alt"])}">'
+        # A data: URI travels with the clipboard payload itself, unlike
+        # the original src: a relative path resolves against *this*
+        # document's own directory (images.py), which means nothing to
+        # whatever the paste target resolves it against -- pasting a
+        # multi-image selection into a rich-text app otherwise shows
+        # broken images even though the HTML/Markdown is well-formed.
+        src = _image_data_uri(info.get("view")) or _html_escape(info["src"])
+        return f'<img src="{src}" alt="{_html_escape(info["alt"])}">'
     if kind == "table":
         return _table_html(info["rows"])
     return ""  # diagram: see module docstring

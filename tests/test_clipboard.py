@@ -281,6 +281,60 @@ def test_content_provider_without_a_texture_has_no_image_flavour():
     assert "image/png" not in provider.ref_formats().get_mime_types()
 
 
+def test_loaded_image_embeds_a_data_uri_in_html(tmp_path):
+    # The bug this fixes: a relative src ("dot.png") resolves against
+    # *this* document's own directory, which means nothing to whatever
+    # a paste target (a rich-text editor's HTML paste, say) resolves it
+    # against -- so the image silently failed to show up at all.
+    renderer, buffer = render_with_local_image("a dot: ![a dot](dot.png)\n", tmp_path)
+    start, end = buffer.get_bounds()
+    html = clipboard.render_html(
+        clipboard.walk_lines(buffer, start, end), renderer.dispatch_targets, renderer.anchor_descriptors,
+    )
+    assert 'src="data:image/png;base64,' in html
+    assert "dot.png" not in html
+
+
+def test_multi_image_selection_still_embeds_every_image(tmp_path):
+    # selection_image_texture only ever hands back a *single* image/png
+    # clipboard flavour (see its docstring on why more than one has no
+    # well-defined payload) -- embedding is per-anchor, in the HTML
+    # itself, so it isn't limited to a one-image selection the way that
+    # is. This is exactly the "select all" case: several loaded images
+    # in one selection, none of which should fall back to a broken
+    # reference.
+    make_png(tmp_path / "second.png")
+    renderer, buffer = render_with_local_image(
+        "![one](dot.png) and ![two](second.png)\n", tmp_path,
+    )
+    start, end = buffer.get_bounds()
+    html = clipboard.render_html(
+        clipboard.walk_lines(buffer, start, end), renderer.dispatch_targets, renderer.anchor_descriptors,
+    )
+    assert html.count('src="data:image/png;base64,') == 2
+
+
+def test_markdown_still_references_the_source_path(tmp_path):
+    # Deliberately not embedded for Markdown: a data: URI would make
+    # the copied "source" unreadable, defeating the point of offering
+    # a Markdown flavour at all. See the module docstring.
+    renderer, buffer = render_with_local_image("![a dot](dot.png)\n", tmp_path)
+    start, end = buffer.get_bounds()
+    markdown = clipboard.render_markdown(
+        clipboard.walk_lines(buffer, start, end), renderer.dispatch_targets, renderer.anchor_descriptors,
+    )
+    assert "![a dot](dot.png)" in markdown
+
+
+def test_unloaded_remote_image_falls_back_to_its_src_reference():
+    renderer, buffer = render("![remote](https://example.com/pic.png)\n")
+    start, end = buffer.get_bounds()
+    html = clipboard.render_html(
+        clipboard.walk_lines(buffer, start, end), renderer.dispatch_targets, renderer.anchor_descriptors,
+    )
+    assert 'src="https://example.com/pic.png"' in html
+
+
 # -- tables --------------------------------------------------------------
 
 def test_table_becomes_a_real_table_in_html():
