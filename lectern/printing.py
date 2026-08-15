@@ -610,6 +610,15 @@ def _out_of_room(y, gap, page_height):
     return y + gap >= page_height
 
 
+# A lead-in paragraph short enough to count as "introducing" whatever
+# follows it (#22), rather than an ordinary paragraph that just happens
+# to precede one.
+LEAD_IN_MAX_LINES = 3
+# Never place, nor strand, fewer than this many consecutive lines of a
+# wrapped paragraph at either side of a page break (#22 part 2).
+MIN_LINES_AT_BREAK = 2
+
+
 def _paginate(blocks, page_height):
     pages, current, y = [], [], 0.0
 
@@ -618,22 +627,46 @@ def _paginate(blocks, page_height):
         pages.append(current)
         current, y = [], 0.0
 
+    def break_for(block, gap):
+        """Start a fresh page for an atomic/table `block` that doesn't
+        fit here. First tries to keep a short lead-in paragraph with it
+        (#22): if the page's last entry is a short paragraph fragment,
+        and it plus `block` would fit a *fresh* page together, retract
+        that fragment and re-place it at the top of the new page ahead
+        of `block`, instead of stranding it alone at this page's foot.
+        Returns the gap to use before `block` wherever it lands."""
+        nonlocal current, y
+        entry = current[-1] if current else None
+        if (entry is not None and entry["type"] == "layout"
+                and len(entry["lines"]) <= LEAD_IN_MAX_LINES):
+            pad = entry["panel"]["pad"] if entry["panel"] else 0.0
+            entry_height = entry["height"] + 2 * pad
+            if entry_height + gap + block.height <= page_height:
+                current.pop()
+                new_page()
+                delta = pad - entry["top"]
+                entry["top"] += delta
+                entry["y"] += delta
+                current.append(entry)
+                y = entry_height
+                return gap
+        new_page()
+        return 0.0
+
     for block in blocks:
         # A page break already separates a block from what came before it,
         # so the gap it was given only applies mid-page.
         gap = block.gap if current else 0.0
         if block.kind == "hr":
             if y + gap + block.height > page_height and current:
-                new_page()
-                gap = 0.0
+                gap = break_for(block, gap)
             current.append({"type": "hr", "y": y + gap + block.height / 2})
             y += gap + block.height
         elif block.kind == "image":
             # Atomic like hr -- an image is never sliced across a page
             # break; _image_draw_size already guaranteed it fits on one.
             if y + gap + block.height > page_height and current:
-                new_page()
-                gap = 0.0
+                gap = break_for(block, gap)
             current.append({
                 "type": "image", "x": block.x, "y": y + gap,
                 "pixbuf": block.pixbuf, "size": block.draw_size,
@@ -644,8 +677,7 @@ def _paginate(blocks, page_height):
             # fit one page, and a diagram sliced in half is unreadable in
             # a way a paragraph is not.
             if y + gap + block.height > page_height and current:
-                new_page()
-                gap = 0.0
+                gap = break_for(block, gap)
             current.append({
                 "type": "diagram", "x": block.x, "y": y + gap,
                 "scene": block.scene, "scale": block.scale,
@@ -654,8 +686,7 @@ def _paginate(blocks, page_height):
             y += gap + block.height
         elif block.kind == "table":
             if current and _out_of_room(y, gap, page_height):
-                new_page()
-                gap = 0.0
+                gap = break_for(block, gap)
             y += gap
             row_layouts, row_heights = block.rows
             total_rows = len(row_layouts)
@@ -696,6 +727,7 @@ def _paginate(blocks, page_height):
                 y += pad
                 remaining = page_height - y - pad - rule_space
                 chunk_top = lines[li][1]
+                li_start = li
                 chunk = []
                 while li < len(lines):
                     _line, y_top, height, _baseline, _x_off = lines[li]
@@ -708,6 +740,23 @@ def _paginate(blocks, page_height):
                     # (it will clip) rather than loop forever.
                     chunk = [lines[li]]
                     li += 1
+                elif len(chunk) < MIN_LINES_AT_BREAK and li < len(lines) and current:
+                    # Orphan (#22 part 2): a single line alone at this
+                    # page's foot, with more of the block still to come.
+                    # Defer the whole thing to a fresh page instead --
+                    # guaranteed to fit at least this line, usually
+                    # several more. The `current` guard is what stops
+                    # this from bouncing forever when it's already the
+                    # top of an empty page.
+                    li = li_start
+                    new_page()
+                    continue
+                elif len(lines) - li == 1 and len(chunk) > MIN_LINES_AT_BREAK:
+                    # Widow: only one line would be left to start the
+                    # next page alone. Hold one more line back so it
+                    # gets two instead.
+                    chunk.pop()
+                    li -= 1
                 chunk_height = (chunk[-1][1] + chunk[-1][2]) - chunk[0][1]
                 current.append({
                     "type": "layout", "x": block.x,
