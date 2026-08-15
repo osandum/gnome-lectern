@@ -62,7 +62,11 @@ class LecternApplication(Adw.Application):
     def _on_about(self, action, param):
         about = Adw.AboutDialog(
             application_name="Lectern",
-            application_icon="text-x-generic-symbolic",
+            # Matches the icon actually installed at
+            # data/icons/hicolor/scalable/apps/APPLICATION_ID.svg (and
+            # the .desktop file's own Icon= line) -- resolved through
+            # the icon theme by name, same as any other themed icon.
+            application_icon=APPLICATION_ID,
             version=__version__,
             developer_name="Lectern contributors",
             license_type=Gtk.License.GPL_2_0,
