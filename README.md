@@ -2,6 +2,7 @@
 
 [![Tests](https://github.com/osandum/lectern/actions/workflows/tests.yml/badge.svg)](https://github.com/osandum/lectern/actions/workflows/tests.yml)
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/License-GPL--2.0--or--later-blue.svg)](LICENSE)
+[![Flathub Downloads](https://img.shields.io/flathub/downloads/io.github.osandum.Lectern)](https://flathub.org/apps/io.github.osandum.Lectern)
 
 A read-only, [Papers](https://apps.gnome.org/da/Papers/)-style Markdown
 viewer for GNOME: open a `.md` file, read it, search/zoom/print it. No
@@ -31,6 +32,23 @@ Local images render immediately. Images with `http(s)` URLs are **not**
 fetched when you open a document — opening a file shouldn't tell whoever
 hosts its images that you opened it, and a per-image URL makes a
 serviceable read receipt. A banner offers to load them, per document.
+
+## Installing
+
+**Flathub:**
+
+```sh
+flatpak install flathub io.github.osandum.Lectern
+```
+
+**Fedora, via COPR:**
+
+```sh
+dnf copr enable osandum/lectern
+dnf install lectern
+```
+
+No packaged builds yet for other distros — see "Running from source" below.
 
 ## Running from source
 
