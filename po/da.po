@@ -20,212 +20,212 @@ msgstr ""
 #: lectern/document.py:88
 #, python-brace-format
 msgid "Could not read {path}"
-msgstr ""
+msgstr "Kunne ikke læse {path}"
 
 #: lectern/images.py:93
 msgid "Remote image not loaded"
-msgstr ""
+msgstr "Eksternt billede ikke indlæst"
 
 #: lectern/images.py:112
 msgid "Loading…"
-msgstr ""
+msgstr "Indlæser…"
 
 #: lectern/images.py:115
 msgid "Bad image URL"
-msgstr ""
+msgstr "Ugyldig billed-URL"
 
 #: lectern/images.py:141
 msgid "Image not found"
-msgstr ""
+msgstr "Billede ikke fundet"
 
 #: lectern/images.py:146
 msgid "Couldn’t load image"
-msgstr ""
+msgstr "Kunne ikke indlæse billede"
 
 #: lectern/images.py:152
 msgid "Couldn’t fetch image"
-msgstr ""
+msgstr "Kunne ikke hente billede"
 
 #: lectern/images.py:156
 #, python-brace-format
 msgid "Image request failed ({status})"
-msgstr ""
+msgstr "Billedforespørgsel mislykkedes ({status})"
 
 #: lectern/images.py:159
 msgid "Empty image response"
-msgstr ""
+msgstr "Tomt billedsvar"
 
 #: lectern/images.py:162
 msgid "Image too large"
-msgstr ""
+msgstr "Billede for stort"
 
 #: lectern/images.py:167
 msgid "Couldn’t decode image"
-msgstr ""
+msgstr "Kunne ikke afkode billede"
 
 #: lectern/images.py:199
 #, python-brace-format
 msgid "{reason}: {src}"
-msgstr ""
+msgstr "{reason}: {src}"
 
 #: lectern/main.py:74
 msgid "A read-only, Papers-style Markdown viewer."
-msgstr ""
+msgstr "En skrivebeskyttet Markdown-fremviser i Papers-stil."
 
 #: lectern/printing.py:1066
 #, python-brace-format
 msgid "Page {page} of {total}"
-msgstr ""
+msgstr "Side {page} af {total}"
 
 #: lectern/window.py:53
 msgid "Load"
-msgstr ""
+msgstr "Indlæs"
 
 #: lectern/window.py:70
 msgid "Find"
-msgstr ""
+msgstr "Find"
 
 #: lectern/window.py:75
 msgid "Print…"
-msgstr ""
+msgstr "Udskriv…"
 
 #: lectern/window.py:76
 msgid "Header and Footer When Printing"
-msgstr ""
+msgstr "Sidehoved og sidefod ved udskrivning"
 
 #: lectern/window.py:77 lectern/window.py:284
 msgid "Document Properties"
-msgstr ""
+msgstr "Dokumentegenskaber"
 
 #: lectern/window.py:78
 msgid "Keyboard Shortcuts"
-msgstr ""
+msgstr "Tastaturgenveje"
 
 #: lectern/window.py:79
 msgid "About Lectern"
-msgstr ""
+msgstr "Om Lectern"
 
 #: lectern/window.py:80
 msgid "Main Menu"
-msgstr ""
+msgstr "Hovedmenu"
 
 #: lectern/window.py:138
 msgid "Find in document"
-msgstr ""
+msgstr "Find i dokument"
 
 #: lectern/window.py:146
 msgid "Whole word"
-msgstr ""
+msgstr "Hele ord"
 
 #: lectern/window.py:146
 msgid "Match whole word only"
-msgstr ""
+msgstr "Match kun hele ord"
 
 #: lectern/window.py:148
 msgid "Case"
-msgstr ""
+msgstr "Versalfølsom"
 
 #: lectern/window.py:148
 msgid "Case sensitive"
-msgstr ""
+msgstr "Skeln mellem store og små bogstaver"
 
 #: lectern/window.py:151
 msgid "Previous match"
-msgstr ""
+msgstr "Forrige match"
 
 #: lectern/window.py:153
 msgid "Next match"
-msgstr ""
+msgstr "Næste match"
 
 #: lectern/window.py:159
 msgid "Close"
-msgstr ""
+msgstr "Luk"
 
 #: lectern/window.py:180
 msgid "Zoom out"
-msgstr ""
+msgstr "Zoom ud"
 
 #: lectern/window.py:182
 msgid "Zoom in"
-msgstr ""
+msgstr "Zoom ind"
 
 #: lectern/window.py:286
 #, python-brace-format
 msgid "Name: {name}"
-msgstr ""
+msgstr "Navn: {name}"
 
 #: lectern/window.py:287
 #, python-brace-format
 msgid "Location: {location}"
-msgstr ""
+msgstr "Placering: {location}"
 
 #: lectern/window.py:288
 #, python-brace-format
 msgid "Size: {size} bytes"
-msgstr ""
+msgstr "Størrelse: {size} byte"
 
 #: lectern/window.py:289
 #, python-brace-format
 msgid "Words: {count}"
-msgstr ""
+msgstr "Ord: {count}"
 
 #: lectern/window.py:290
 #, python-brace-format
 msgid "Est. reading time: {minutes} min"
-msgstr ""
+msgstr "Anslået læsetid: {minutes} min"
 
 #: lectern/window.py:295
 msgid "OK"
-msgstr ""
+msgstr "OK"
 
 #: lectern/window.py:339
 #, python-brace-format
 msgid "{position} / {count}"
-msgstr ""
+msgstr "{position} / {count}"
 
 #: lectern/window.py:341
 msgid "No matches"
-msgstr ""
+msgstr "Ingen match"
 
 #: lectern/window.py:353
 #, python-brace-format
 msgid "This document contains {count} remote image, not loaded"
 msgid_plural "This document contains {count} remote images, not loaded"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Dette dokument indeholder {count} eksternt billede, som ikke er indlæst"
+msgstr[1] "Dette dokument indeholder {count} eksterne billeder, som ikke er indlæst"
 
 #: lectern/window.py:461
 msgid "Couldn’t open link"
-msgstr ""
+msgstr "Kunne ikke åbne link"
 
 #: lectern/window.py:490
 msgid "No Document"
-msgstr ""
+msgstr "Intet dokument"
 
 #: lectern/window.py:491
 msgid "Open a Markdown file to view it here."
-msgstr ""
+msgstr "Åbn en Markdown-fil for at se den her."
 
 #: lectern/window.py:494
 msgid "Open File…"
-msgstr ""
+msgstr "Åbn fil…"
 
 #: lectern/window.py:502
 msgid "Open Markdown File"
-msgstr ""
+msgstr "Åbn Markdown-fil"
 
 #: lectern/window.py:503
 msgid "Markdown files"
-msgstr ""
+msgstr "Markdown-filer"
 
 #: lectern/window.py:555
 msgid "Couldn’t Open File"
-msgstr ""
+msgstr "Kunne ikke åbne fil"
 
 #: lectern/window.py:605
 msgid "Reloaded"
-msgstr ""
+msgstr "Genindlæst"
 
 #: lectern/window.py:608
 msgid "File no longer available"
-msgstr ""
+msgstr "Filen er ikke længere tilgængelig"
