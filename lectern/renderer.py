@@ -139,6 +139,13 @@ class MarkdownRenderer:
         # mermaid.DiagramView per drawn diagram. Width-synced and zoomed
         # by window.py the same way images are.
         self.diagrams = []
+        # Gtk.TextChildAnchor -> {"kind": "hr"/"image"/"table"/"diagram",
+        # ...}. clipboard.py's buffer walk sees a bare anchor object (the
+        # buffer's text stream holds only its object-replacement
+        # character), and needs this to know what stood there -- table
+        # and diagram anchors are recorded too, so it can skip them with
+        # a documented reason rather than mishandling them.
+        self.anchor_descriptors = {}
         self._footnote_ref_marks = {}   # label -> mark name
         self._footnote_def_marks = {}   # label -> mark name
         self._pending_anchors = []      # (anchor, widget) drained by caller
@@ -435,6 +442,7 @@ class MarkdownRenderer:
         self._block_padding_override = 0
         anchor = buffer.create_child_anchor(it)
         self._pending_anchors.append((anchor, view))
+        self.anchor_descriptors[anchor] = {"kind": "diagram"}
         self.diagrams.append(view)
         buffer.insert(it, "\n")
         self.print_model.append(
@@ -446,6 +454,7 @@ class MarkdownRenderer:
         anchor = buffer.create_child_anchor(it)
         separator = Gtk.Separator(hexpand=True)
         self._pending_anchors.append((anchor, separator))
+        self.anchor_descriptors[anchor] = {"kind": "hr"}
         buffer.insert(it, "\n")
         self.print_model.append(PrintItem("hr", block_tags=list(ctx.block_tags)))
 
@@ -455,6 +464,12 @@ class MarkdownRenderer:
         anchor = buffer.create_child_anchor(it)
         self.tables.append((anchor, cells))
         self._pending_anchors.append((anchor, widget))
+        # "kind" only, no row data -- a copied selection spanning a table
+        # skips it rather than reconstructing one (see clipboard.py).
+        # Table cells are separately, natively copyable already: each is
+        # its own selectable Gtk.Label, which binds Ctrl+C itself (see
+        # tables.py).
+        self.anchor_descriptors[anchor] = {"kind": "table"}
         buffer.insert(it, "\n")
         self.print_model.append(PrintItem("table", rows=rows, block_tags=list(ctx.block_tags)))
 
@@ -486,6 +501,7 @@ class MarkdownRenderer:
         anchor = buffer.create_child_anchor(it)
         self.images.append(view)
         self._pending_anchors.append((anchor, view))
+        self.anchor_descriptors[anchor] = {"kind": "image", "src": src, "alt": alt}
         self.print_model.append(
             PrintItem("image", block_tags=list(block_tags), image=view)
         )
@@ -593,7 +609,14 @@ class MarkdownRenderer:
             self._prev_block_bottom = self._block_bottom_margin(first)
             self._prev_block_padding = 0
         else:
-            buffer.insert_with_tags_by_name(it, marker_text + "\n", *(ctx.block_tags + [marker_tag]))
+            # The trailing "\n" is inserted bare (no tags), matching
+            # every other block terminator (_emit_paragraph_body,
+            # _emit_hr, ...) -- an invisible character's styling can't
+            # affect what's drawn, but clipboard.py's buffer walk uses
+            # "an untagged newline" as its one signal for "a block ends
+            # here", and a tagged one here would hide that boundary.
+            buffer.insert_with_tags_by_name(it, marker_text, *(ctx.block_tags + [marker_tag]))
+            buffer.insert(it, "\n")
             self.print_model.append(
                 PrintItem("paragraph", runs=[(marker_text, [marker_tag])], block_tags=list(ctx.block_tags))
             )

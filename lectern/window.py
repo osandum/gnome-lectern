@@ -555,6 +555,8 @@ class LecternWindow(Adw.ApplicationWindow):
         base_dir = self._document.gfile.get_parent() if self._document else None
         self._renderer.render(self._document.tree, buffer, dark=dark, base_dir=base_dir)
         self._textview.set_buffer(buffer)
+        self._textview.dispatch_targets = self._renderer.dispatch_targets
+        self._textview.anchor_descriptors = self._renderer.anchor_descriptors
         self._images = self._renderer.images
         self._diagrams = self._renderer.diagrams
         for diagram in self._diagrams:

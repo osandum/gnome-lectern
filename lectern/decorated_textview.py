@@ -34,6 +34,7 @@ gi.require_version("Pango", "1.0")
 from gi.repository import Gtk, Adw, Graphene, Pango
 
 from . import tags as tagdefs
+from . import clipboard
 
 # Slack (px) added around the visible rectangle when deciding which
 # tagged ranges to draw, so a chip or panel whose text sits just off
@@ -61,6 +62,14 @@ class DecoratedTextView(Gtk.TextView):
         # The zoom factor to lay out at, pushed in by zoom.py: tags.py's
         # lengths are all written against a 100% base font.
         self._layout_scale = 1.0
+        # Set by window.py after each render -- clipboard.py needs both
+        # to turn a selection's tags back into a link href or an
+        # anchor's original hr/image/table/diagram. Plain dicts rather
+        # than a MarkdownRenderer reference, so an unrendered/empty-state
+        # view (no renderer yet) just sees "nothing resolves", not an
+        # AttributeError.
+        self.dispatch_targets = {}
+        self.anchor_descriptors = {}
         # A freshly rendered buffer arrives with its tags at base values,
         # whatever the current zoom.
         self.connect("notify::buffer", lambda *_a: self._sync_metrics())
@@ -134,6 +143,24 @@ class DecoratedTextView(Gtk.TextView):
         # pass rather than oscillating.
         self._sync_metrics(width)
         Gtk.TextView.do_size_allocate(self, width, height, baseline)
+
+    def do_copy_clipboard(self):
+        """Put text/html and text/markdown on the clipboard alongside
+        plain text, reconstructed from the selection's own Gtk.TextTags
+        -- the default handler this overrides only ever puts plain
+        text there. Fires for both Ctrl+C and the context menu's Copy,
+        since GTK's own menu is wired to this same virtual method."""
+        buffer = self.get_buffer()
+        bounds = buffer.get_selection_bounds() if buffer is not None else None
+        if not bounds:
+            Gtk.TextView.do_copy_clipboard(self)
+            return
+        start, end = bounds
+        plain = buffer.get_text(start, end, True)
+        html, markdown = clipboard.selection_to_html_and_markdown(
+            buffer, self.dispatch_targets, self.anchor_descriptors, start, end,
+        )
+        self.get_clipboard().set_content(clipboard.make_content_provider(plain, html, markdown))
 
     # -- buffer/geometry helpers -------------------------------------------
 
