@@ -4,6 +4,8 @@ bare `lectern` launch with no file to parse doesn't pay for them.
 """
 from gi.repository import Gio, GLib
 
+from .i18n import _
+
 
 class DocumentLoadError(Exception):
     pass
@@ -83,7 +85,7 @@ class Document:
         except GLib.Error as ex:
             raise DocumentLoadError(str(ex)) from ex
         if not ok:
-            raise DocumentLoadError(f"Could not read {self.path}")
+            raise DocumentLoadError(_("Could not read {path}").format(path=self.path))
         text = contents.decode("utf-8", errors="replace")
         tokens = self.parser.parse(text)
         self.text = text

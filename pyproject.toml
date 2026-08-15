@@ -23,3 +23,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["lectern*"]
+
+[tool.setuptools.package-data]
+# Compiled translation catalogues (see po/README.md for how they get
+# built) -- lectern/i18n.py loads them from here at runtime. An empty
+# match (no languages built yet) is not an error.
+lectern = ["locale/*/LC_MESSAGES/*.mo"]

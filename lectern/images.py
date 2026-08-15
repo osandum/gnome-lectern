@@ -25,6 +25,8 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Gdk, Gio, GLib, Adw
 
+from .i18n import _
+
 # Remote fetches share one session per process. Created lazily so a
 # document with no remote images never constructs one at all.
 _session = None
@@ -88,7 +90,7 @@ class ImageView(Gtk.Box):
         self.set_margin_top(6)
         self.set_margin_bottom(6)
         if self.remote:
-            self._show_placeholder("Remote image not loaded", "globe-symbolic")
+            self._show_placeholder(_("Remote image not loaded"), "globe-symbolic")
         else:
             self._load_local()
 
@@ -107,10 +109,10 @@ class ImageView(Gtk.Box):
         document when the banner's Load is pressed."""
         if not self.remote or self._texture is not None:
             return
-        self._show_placeholder("Loading…", "content-loading-symbolic")
+        self._show_placeholder(_("Loading…"), "content-loading-symbolic")
         message = self._build_message()
         if message is None:
-            self._fail("Bad image URL")
+            self._fail(_("Bad image URL"))
             return
         _soup_session().send_and_read_async(
             message, GLib.PRIORITY_DEFAULT, None, self._on_remote_read, message
@@ -136,33 +138,33 @@ class ImageView(Gtk.Box):
     def _load_local(self):
         gfile = _resolve_local(self.src, self._base_dir)
         if gfile is None:
-            self._fail("Image not found")
+            self._fail(_("Image not found"))
             return
         try:
             self._set_texture(Gdk.Texture.new_from_file(gfile))
         except GLib.Error:
-            self._fail("Couldn’t load image")
+            self._fail(_("Couldn’t load image"))
 
     def _on_remote_read(self, session, result, message):
         try:
             data = session.send_and_read_finish(result)
         except GLib.Error:
-            self._fail("Couldn’t fetch image")
+            self._fail(_("Couldn’t fetch image"))
             return
         status = message.get_status()
         if status != 200:
-            self._fail(f"Image request failed ({int(status)})")
+            self._fail(_("Image request failed ({status})").format(status=int(status)))
             return
         if data is None or data.get_size() == 0:
-            self._fail("Empty image response")
+            self._fail(_("Empty image response"))
             return
         if data.get_size() > MAX_REMOTE_BYTES:
-            self._fail("Image too large")
+            self._fail(_("Image too large"))
             return
         try:
             self._set_texture(Gdk.Texture.new_from_bytes(data))
         except GLib.Error:
-            self._fail("Couldn’t decode image")
+            self._fail(_("Couldn’t decode image"))
 
     # -- presentation ----------------------------------------------------
 
@@ -194,7 +196,7 @@ class ImageView(Gtk.Box):
         label.set_width_chars(24)
         label.set_max_width_chars(60)
         box.append(label)
-        box.set_tooltip_text(f"{reason}: {self.src}")
+        box.set_tooltip_text(_("{reason}: {src}").format(reason=reason, src=self.src))
         frame = Gtk.Frame()
         frame.set_child(box)
         box.set_margin_top(8)
