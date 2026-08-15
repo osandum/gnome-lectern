@@ -72,6 +72,7 @@ class LecternWindow(Adw.ApplicationWindow):
 
         menu = Gio.Menu()
         menu.append("Print…", "win.print-doc")
+        menu.append("Header and Footer When Printing", "win.print-header-footer")
         menu.append("Document Properties", "win.properties")
         menu.append("Keyboard Shortcuts", "win.show-help-overlay")
         menu.append("About Lectern", "app.about")
@@ -244,15 +245,36 @@ class LecternWindow(Adw.ApplicationWindow):
             action.connect("activate", handler)
             self.add_action(action)
 
+        # A checkable menu item rather than a print-dialog option: GTK's
+        # print dialog is routed through the xdg-desktop-portal on this
+        # (and most modern Wayland) desktops, which flatly refuses to host
+        # an app-supplied custom widget ("create-custom-widget not
+        # supported with portal") -- so the toggle has to live in Lectern's
+        # own UI instead. In-memory only: it resets to off on relaunch
+        # rather than persisting via GSettings.
+        header_footer_action = Gio.SimpleAction.new_stateful(
+            "print-header-footer", None, GLib.Variant.new_boolean(False)
+        )
+        header_footer_action.connect("change-state", self._action_toggle_header_footer)
+        self.add_action(header_footer_action)
+
     def _action_find(self, action, param):
         self._find_toggle.set_active(True)
+
+    def _action_toggle_header_footer(self, action, value):
+        action.set_state(value)
 
     def _action_print(self, action, param):
         if self._renderer is None:
             return
         coordinator = PrintCoordinator()
-        title = self._document.basename if self._document else "document"
-        coordinator.print_document(self, self._renderer.print_model, self._style_manager.get_dark(), title)
+        file_name = self._document.basename if self._document else "document"
+        doc_title = self._document.title if self._document else None
+        header_footer = self.lookup_action("print-header-footer").get_state().get_boolean()
+        coordinator.print_document(
+            self, self._renderer.print_model, self._style_manager.get_dark(), doc_title, file_name,
+            header_footer=header_footer,
+        )
 
     def _action_properties(self, action, param):
         if self._document is None:

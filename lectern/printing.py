@@ -16,7 +16,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Pango", "1.0")
 gi.require_version("PangoCairo", "1.0")
-from gi.repository import Gtk, Gdk, Pango, PangoCairo
+from gi.repository import GLib, Gtk, Gdk, Pango, PangoCairo
 
 from . import tags as tagdefs
 from . import tables as tabledefs
@@ -855,17 +855,79 @@ def _draw_entry(cr, entry, page_width):
             cr.restore()
 
 
+# Running head/foot, opt-in (see print_document's header_footer arg): a
+# small, muted line above and below the body -- distinct from document
+# text so it reads as page chrome, not content. Sized in points like
+# everything else here, not off PRINT_BASE_PT, since it should stay put
+# regardless of what body size print settles on.
+HEADER_FOOTER_FONT_PT = 9.0
+HEADER_FOOTER_RGB = (0.45, 0.45, 0.45)
+HEADER_BAND_PT = 24.0
+FOOTER_BAND_PT = 20.0
+HEADER_TEXT_TOP_PT = 4.0
+FOOTER_TEXT_TOP_PT = 4.0
+
+
+def _header_footer_font():
+    desc = _base_font()
+    desc.set_size(int(HEADER_FOOTER_FONT_PT * Pango.SCALE))
+    return desc
+
+
+def _header_left_text(doc_title, file_name):
+    """The document's own title (its first h1) alongside the file name,
+    so a stack of printouts can still be traced back to its file -- just
+    the file name on its own if the document has no title, so the two
+    never show up as a spurious "file.md -- file.md"."""
+    if doc_title and doc_title != file_name:
+        return f"{doc_title} – {file_name}"
+    return file_name
+
+
+def _draw_header_footer_line(cr, context, font, left, right, y, width):
+    """One line of small print, `left` flush to the text column's left
+    edge and `right` flush to its right -- the same simple two-up layout
+    for both the header and the footer."""
+    cr.save()
+    cr.set_source_rgb(*HEADER_FOOTER_RGB)
+    if left:
+        layout = context.create_pango_layout()
+        layout.set_font_description(font)
+        layout.set_text(left, -1)
+        cr.move_to(0, y)
+        PangoCairo.show_layout(cr, layout)
+    if right:
+        layout = context.create_pango_layout()
+        layout.set_font_description(font)
+        layout.set_text(right, -1)
+        _ink, logical = layout.get_extents()
+        cr.move_to(width - Pango.units_to_double(logical.width), y)
+        PangoCairo.show_layout(cr, layout)
+    cr.restore()
+
+
 class PrintCoordinator:
     """One instance per print action; holds no state between calls."""
 
-    def print_document(self, parent_window, print_model, dark, title,
-                        action=Gtk.PrintOperationAction.PRINT_DIALOG, export_path=None):
+    def print_document(self, parent_window, print_model, dark, doc_title, file_name,
+                        action=Gtk.PrintOperationAction.PRINT_DIALOG, export_path=None,
+                        header_footer=False):
+        # header_footer is a plain argument, decided by the caller before
+        # the dialog even opens -- not read out of the dialog itself.
+        # GtkPrintOperation's create-custom-widget/custom-widget-apply
+        # would be the natural fit, but GTK's print dialog is routed
+        # through the xdg-desktop-portal on this (and most modern
+        # Wayland) desktops, and that path flatly refuses to host an
+        # app-supplied widget ("create-custom-widget not supported with
+        # portal", confirmed live against this GTK). See window.py's
+        # "print-header-footer" menu action for where the choice is made
+        # instead.
         op = Gtk.PrintOperation()
-        op.set_job_name(title)
+        op.set_job_name(file_name)
         op.set_default_page_setup(_print_page_setup())
         if export_path:
             op.set_export_filename(export_path)
-        state = {}
+        state = {"header_footer": header_footer, "header_left": _header_left_text(doc_title, file_name)}
         op.connect("begin-print", self._on_begin_print, print_model, dark, state)
         op.connect("draw-page", self._on_draw_page, state)
         return op.run(action, parent_window)
@@ -873,18 +935,39 @@ class PrintCoordinator:
     def _on_begin_print(self, op, context, print_model, dark, state):
         style_table = tagdefs.tag_style_props(dark)
         width, height = context.get_width(), context.get_height()
+        header_band = HEADER_BAND_PT if state["header_footer"] else 0.0
+        footer_band = FOOTER_BAND_PT if state["header_footer"] else 0.0
+        body_height = height - header_band - footer_band
         state["width"] = width
-        blocks = _build_blocks(context, style_table, print_model, width, height, dark)
+        state["height"] = height
+        state["header_band"] = header_band
+        blocks = _build_blocks(context, style_table, print_model, width, body_height, dark)
         # Pango.LayoutLine keeps only a *weak* back-reference to its parent
         # Pango.Layout -- without this, `blocks` (and therefore every
         # Layout) would be garbage collected the moment this method
         # returns, and draw-page would run against dangling lines.
         state["blocks"] = blocks
-        pages = _paginate(blocks, height)
+        pages = _paginate(blocks, body_height)
         state["pages"] = pages
         op.set_n_pages(len(pages))
 
     def _on_draw_page(self, op, context, page_nr, state):
         cr = context.get_cairo_context()
+        header_band = state["header_band"]
+        cr.save()
+        cr.translate(0, header_band)
         for entry in state["pages"][page_nr]:
             _draw_entry(cr, entry, state["width"])
+        cr.restore()
+        if state["header_footer"]:
+            font = _header_footer_font()
+            print_time = GLib.DateTime.new_now_local().format("%x %X")
+            _draw_header_footer_line(
+                cr, context, font, state["header_left"], print_time,
+                HEADER_TEXT_TOP_PT, state["width"],
+            )
+            footer_y = state["height"] - FOOTER_BAND_PT + FOOTER_TEXT_TOP_PT
+            page_label = f"Page {page_nr + 1} of {len(state['pages'])}"
+            _draw_header_footer_line(
+                cr, context, font, None, page_label, footer_y, state["width"],
+            )
