@@ -1,0 +1,233 @@
+# Swedish translations for lectern package.
+# Copyright (C) 2026 Ole Sandum
+# This file is distributed under the same license as the lectern package.
+# AI-assisted (Claude), cross-referenced against GNOME's own
+# translations (GTK, Papers) for established terminology; not yet
+# reviewed by a native speaker.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: lectern 0.2.0\n"
+"Report-Msgid-Bugs-To: https://github.com/osandum/lectern/issues\n"
+"POT-Creation-Date: 2026-08-15 17:46+0200\n"
+"PO-Revision-Date: 2026-08-15 17:46+0200\n"
+"Last-Translator: \n"
+"Language-Team: Swedish\n"
+"Language: sv\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: lectern/document.py:88
+#, python-brace-format
+msgid "Could not read {path}"
+msgstr "Kunde inte läsa {path}"
+
+#: lectern/images.py:93
+msgid "Remote image not loaded"
+msgstr "Extern bild inte inläst"
+
+#: lectern/images.py:112
+msgid "Loading…"
+msgstr "Läser in…"
+
+#: lectern/images.py:115
+msgid "Bad image URL"
+msgstr "Ogiltig bild-URL"
+
+#: lectern/images.py:141
+msgid "Image not found"
+msgstr "Bilden hittades inte"
+
+#: lectern/images.py:146
+msgid "Couldn’t load image"
+msgstr "Kunde inte läsa in bilden"
+
+#: lectern/images.py:152
+msgid "Couldn’t fetch image"
+msgstr "Kunde inte hämta bilden"
+
+#: lectern/images.py:156
+#, python-brace-format
+msgid "Image request failed ({status})"
+msgstr "Bildbegäran misslyckades ({status})"
+
+#: lectern/images.py:159
+msgid "Empty image response"
+msgstr "Tomt bildsvar"
+
+#: lectern/images.py:162
+msgid "Image too large"
+msgstr "Bilden är för stor"
+
+#: lectern/images.py:167
+msgid "Couldn’t decode image"
+msgstr "Kunde inte avkoda bilden"
+
+#: lectern/images.py:199
+#, python-brace-format
+msgid "{reason}: {src}"
+msgstr "{reason}: {src}"
+
+#: lectern/main.py:74
+msgid "A read-only, Papers-style Markdown viewer."
+msgstr "En skrivskyddad Markdown-visare i Papers stil."
+
+#: lectern/printing.py:1066
+#, python-brace-format
+msgid "Page {page} of {total}"
+msgstr "Sida {page} av {total}"
+
+#: lectern/window.py:53
+msgid "Load"
+msgstr "Läs in"
+
+#: lectern/window.py:70
+msgid "Find"
+msgstr "Sök"
+
+#: lectern/window.py:75
+msgid "Print…"
+msgstr "Skriv ut…"
+
+#: lectern/window.py:76
+msgid "Header and Footer When Printing"
+msgstr "Sidhuvud och sidfot vid utskrift"
+
+#: lectern/window.py:77 lectern/window.py:284
+msgid "Document Properties"
+msgstr "Dokumentegenskaper"
+
+#: lectern/window.py:78
+msgid "Keyboard Shortcuts"
+msgstr "Tangentbordsgenvägar"
+
+#: lectern/window.py:79
+msgid "About Lectern"
+msgstr "Om Lectern"
+
+#: lectern/window.py:80
+msgid "Main Menu"
+msgstr "Huvudmeny"
+
+#: lectern/window.py:138
+msgid "Find in document"
+msgstr "Sök i dokumentet"
+
+#: lectern/window.py:146
+msgid "Whole word"
+msgstr "Hela ord"
+
+#: lectern/window.py:146
+msgid "Match whole word only"
+msgstr "Matcha endast hela ord"
+
+#: lectern/window.py:148
+msgid "Case"
+msgstr "Skiftläge"
+
+#: lectern/window.py:148
+msgid "Case sensitive"
+msgstr "Skiftlägeskänslig"
+
+#: lectern/window.py:151
+msgid "Previous match"
+msgstr "Föregående träff"
+
+#: lectern/window.py:153
+msgid "Next match"
+msgstr "Nästa träff"
+
+#: lectern/window.py:159
+msgid "Close"
+msgstr "Stäng"
+
+#: lectern/window.py:180
+msgid "Zoom out"
+msgstr "Zooma ut"
+
+#: lectern/window.py:182
+msgid "Zoom in"
+msgstr "Zooma in"
+
+#: lectern/window.py:286
+#, python-brace-format
+msgid "Name: {name}"
+msgstr "Namn: {name}"
+
+#: lectern/window.py:287
+#, python-brace-format
+msgid "Location: {location}"
+msgstr "Plats: {location}"
+
+#: lectern/window.py:288
+#, python-brace-format
+msgid "Size: {size} bytes"
+msgstr "Storlek: {size} byte"
+
+#: lectern/window.py:289
+#, python-brace-format
+msgid "Words: {count}"
+msgstr "Ord: {count}"
+
+#: lectern/window.py:290
+#, python-brace-format
+msgid "Est. reading time: {minutes} min"
+msgstr "Uppskattad lästid: {minutes} min"
+
+#: lectern/window.py:295
+msgid "OK"
+msgstr "OK"
+
+#: lectern/window.py:339
+#, python-brace-format
+msgid "{position} / {count}"
+msgstr "{position} / {count}"
+
+#: lectern/window.py:341
+msgid "No matches"
+msgstr "Inga träffar"
+
+#: lectern/window.py:353
+#, python-brace-format
+msgid "This document contains {count} remote image, not loaded"
+msgid_plural "This document contains {count} remote images, not loaded"
+msgstr[0] "Detta dokument innehåller {count} extern bild som inte har lästs in"
+msgstr[1] "Detta dokument innehåller {count} externa bilder som inte har lästs in"
+
+#: lectern/window.py:461
+msgid "Couldn’t open link"
+msgstr "Kunde inte öppna länken"
+
+#: lectern/window.py:490
+msgid "No Document"
+msgstr "Inget dokument"
+
+#: lectern/window.py:491
+msgid "Open a Markdown file to view it here."
+msgstr "Öppna en Markdown-fil för att visa den här."
+
+#: lectern/window.py:494
+msgid "Open File…"
+msgstr "Öppna fil…"
+
+#: lectern/window.py:502
+msgid "Open Markdown File"
+msgstr "Öppna Markdown-fil"
+
+#: lectern/window.py:503
+msgid "Markdown files"
+msgstr "Markdown-filer"
+
+#: lectern/window.py:555
+msgid "Couldn’t Open File"
+msgstr "Kunde inte öppna filen"
+
+#: lectern/window.py:605
+msgid "Reloaded"
+msgstr "Inläst igen"
+
+#: lectern/window.py:608
+msgid "File no longer available"
+msgstr "Filen är inte längre tillgänglig"
