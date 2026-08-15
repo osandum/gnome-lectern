@@ -295,7 +295,16 @@ def _image_data_uri(view):
     hasn't got any (a remote image the reader hasn't opted to fetch,
     or one that failed) -- see the module docstring on why this beats
     a src reference for *any* number of images, not just when the
-    selection is exactly one."""
+    selection is exactly one.
+
+    Confirmed against real mail-client behaviour, not just spec
+    reading: composing a message in Thunderbird (pasting, or even just
+    saving the draft) lifts each data: URI back out into its own
+    multipart/related MIME part addressed by a generated cid:, rather
+    than sending the URI verbatim -- exactly the point of a data: URI
+    at this end, and further proof there's no reason to also try to
+    reproduce that cid: rewriting here ourselves.
+    """
     texture = view.texture if view is not None else None
     if texture is None:
         return None
