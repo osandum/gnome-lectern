@@ -160,7 +160,9 @@ class DecoratedTextView(Gtk.TextView):
         html, markdown = clipboard.selection_to_html_and_markdown(
             buffer, self.dispatch_targets, self.anchor_descriptors, start, end,
         )
-        self.get_clipboard().set_content(clipboard.make_content_provider(plain, html, markdown))
+        texture = clipboard.selection_image_texture(buffer, self.anchor_descriptors, start, end)
+        provider = clipboard.make_content_provider(plain, html, markdown, texture)
+        self.get_clipboard().set_content(provider)
 
     # -- buffer/geometry helpers -------------------------------------------
 

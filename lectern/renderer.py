@@ -501,7 +501,11 @@ class MarkdownRenderer:
         anchor = buffer.create_child_anchor(it)
         self.images.append(view)
         self._pending_anchors.append((anchor, view))
-        self.anchor_descriptors[anchor] = {"kind": "image", "src": src, "alt": alt}
+        # `view` itself, not just src/alt: clipboard.py reads its
+        # `.texture` at copy time (same reasoning as printing.py reading
+        # it at print time -- an image loaded, or a remote one fetched,
+        # after this render still has to be reflected live).
+        self.anchor_descriptors[anchor] = {"kind": "image", "src": src, "alt": alt, "view": view}
         self.print_model.append(
             PrintItem("image", block_tags=list(block_tags), image=view)
         )

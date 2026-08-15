@@ -43,6 +43,26 @@ def to_html_and_markdown(markdown_text, offsets=None):
     )
 
 
+def make_png(path, width=2, height=2):
+    from gi.repository import GdkPixbuf
+    pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, width, height)
+    pixbuf.fill(0xFF0000FF)
+    pixbuf.savev(str(path), "png", [], [])
+
+
+def render_with_local_image(markdown_text, tmp_path, filename="dot.png"):
+    """Same as render(), but with a real local image file on disk so a
+    `![alt](filename)` reference actually loads a Gdk.Texture
+    synchronously (ImageView._load_local), rather than staying an
+    unresolved placeholder."""
+    make_png(tmp_path / filename)
+    tree = SyntaxTreeNode(_PARSER.parse(markdown_text))
+    buffer = Gtk.TextBuffer(tag_table=create_tag_table(dark=False))
+    renderer = MarkdownRenderer()
+    renderer.render(tree, buffer, base_dir=Gio.File.new_for_path(str(tmp_path)))
+    return renderer, buffer
+
+
 # -- inline formatting --------------------------------------------------------
 
 def test_bold_and_italic():
@@ -192,6 +212,73 @@ def test_image_alone_in_its_own_paragraph_still_gets_a_p_wrapper():
     # one alone in its own paragraph inside a <p>.
     html, _md = to_html_and_markdown("![a dot](dot.png)\n")
     assert '<p><img src="dot.png" alt="a dot"></p>' in html
+
+
+# -- real image bytes on the clipboard ---------------------------------------
+
+def test_selection_with_one_image_yields_its_texture(tmp_path):
+    renderer, buffer = render_with_local_image("before ![a dot](dot.png) after\n", tmp_path)
+    start, end = buffer.get_bounds()
+    texture = clipboard.selection_image_texture(buffer, renderer.anchor_descriptors, start, end)
+    assert texture is not None
+    assert texture.get_width() == 2 and texture.get_height() == 2
+
+
+def test_selection_with_no_image_yields_no_texture(tmp_path):
+    renderer, buffer = render_with_local_image("just text, no image\n", tmp_path)
+    start, end = buffer.get_bounds()
+    assert clipboard.selection_image_texture(buffer, renderer.anchor_descriptors, start, end) is None
+
+
+def test_selection_with_two_images_yields_no_texture(tmp_path):
+    make_png(tmp_path / "second.png")
+    renderer, buffer = render_with_local_image(
+        "![one](dot.png) and ![two](second.png)\n", tmp_path,
+    )
+    start, end = buffer.get_bounds()
+    assert clipboard.selection_image_texture(buffer, renderer.anchor_descriptors, start, end) is None
+
+
+def test_remote_image_not_yet_loaded_yields_no_texture():
+    # Remote images are never fetched just from opening the document
+    # (see images.py's module docstring) -- no pixels to give here.
+    renderer, buffer = render("![remote](https://example.com/pic.png)\n")
+    start, end = buffer.get_bounds()
+    assert clipboard.selection_image_texture(buffer, renderer.anchor_descriptors, start, end) is None
+
+
+def test_content_provider_with_a_texture_offers_image_png(tmp_path):
+    from gi.repository import GdkPixbuf
+    make_png(tmp_path / "dot.png")
+    texture = Gdk.Texture.new_from_filename(str(tmp_path / "dot.png"))
+    provider = clipboard.make_content_provider("plain", "<p>html</p>", "md", texture)
+    formats = provider.ref_formats()
+    assert "image/png" in formats.get_mime_types()
+
+    loop = GLib.MainLoop()
+    result = {}
+
+    def on_done(source, res, stream):
+        source.write_mime_type_finish(res)
+        stream.close(None)
+        result["bytes"] = stream.steal_as_bytes().get_data()
+        loop.quit()
+
+    stream = Gio.MemoryOutputStream.new_resizable()
+    provider.write_mime_type_async(
+        "image/png", stream, GLib.PRIORITY_DEFAULT, None, on_done, stream,
+    )
+    GLib.timeout_add(2000, loop.quit)
+    loop.run()
+    loaded = GdkPixbuf.Pixbuf.new_from_stream(
+        Gio.MemoryInputStream.new_from_data(result["bytes"], None), None,
+    )
+    assert (loaded.get_width(), loaded.get_height()) == (2, 2)
+
+
+def test_content_provider_without_a_texture_has_no_image_flavour():
+    provider = clipboard.make_content_provider("plain", "<p>html</p>", "md")
+    assert "image/png" not in provider.ref_formats().get_mime_types()
 
 
 # -- tables --------------------------------------------------------------

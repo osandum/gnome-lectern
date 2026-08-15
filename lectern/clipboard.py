@@ -1,8 +1,10 @@
 """Copy: put text/html and a text/markdown flavour on the clipboard
-alongside plain text, so pasting a Lectern selection into a rich-text-
-aware app (mail, chat, office) or a Markdown editor keeps its
-formatting -- Gtk.TextView's default copy-clipboard handler only ever
-puts plain text on the clipboard, discarding every Gtk.TextTag.
+alongside plain text -- and, when the selection is exactly one image,
+its actual pixels too (image/png) -- so pasting a Lectern selection
+into a rich-text-aware app (mail, chat, office) or a Markdown editor
+keeps its formatting. Gtk.TextView's default copy-clipboard handler
+only ever puts plain text on the clipboard, discarding every
+Gtk.TextTag.
 
 Driven off the live Gtk.TextBuffer and its tags for the *selected
 range only* -- unlike printing.py, which works off the whole
@@ -683,21 +685,61 @@ def selection_to_html_and_markdown(buffer, dispatch_targets, anchor_descriptors,
     return html, markdown
 
 
-def make_content_provider(plain_text, html, markdown):
-    """A Gdk.ContentProvider offering all three flavours at once --
-    receiving apps pick whichever they understand, plain text as the
-    universal fallback. new_for_value(a string GValue) is used for
-    plain text rather than hand-building text/plain bytes: GDK already
-    knows how to serialize a string GValue to every plain-text mimetype
-    a receiver might ask for (text/plain;charset=utf-8, UTF8_STRING,
+def selection_image_texture(buffer, anchor_descriptors, start, end):
+    """The Gdk.Texture backing the *one* image anchor in [start, end),
+    or None if the selection has none, more than one, or its one image
+    hasn't got pixels to give (a remote image the reader hasn't opted
+    to load, or one that failed) -- reference-based markup
+    (_anchor_markdown/_anchor_html) is the fallback for all of those,
+    same as it always has been. A multi-image selection could in
+    principle offer several, but most clipboard consumers only look at
+    a single image/* flavour, so there's no well-defined "the" image to
+    hand them in that case.
+
+    A plain forward walk rather than routing through walk_lines: this
+    only needs to notice child anchors, not reconstruct paragraph/list/
+    heading structure around them.
+    """
+    it = start.copy()
+    texture = None
+    seen = 0
+    while it.compare(end) < 0:
+        anchor = it.get_child_anchor()
+        if anchor is not None:
+            info = anchor_descriptors.get(anchor)
+            if info is not None and info.get("kind") == "image":
+                seen += 1
+                texture = info["view"].texture
+        if not it.forward_char():
+            break
+    return texture if seen == 1 else None
+
+
+def make_content_provider(plain_text, html, markdown, image_texture=None):
+    """A Gdk.ContentProvider offering all flavours at once -- receiving
+    apps pick whichever they understand, plain text as the universal
+    fallback. new_for_value(a string GValue) is used for plain text
+    rather than hand-building text/plain bytes: GDK already knows how
+    to serialize a string GValue to every plain-text mimetype a
+    receiver might ask for (text/plain;charset=utf-8, UTF8_STRING,
     STRING, ...), which is exactly what Gdk.Clipboard.set_text() relies
     on internally.
+
+    `image_texture`, if given, adds real image/png bytes alongside the
+    reference-based markup already in `html`/`markdown` (an `<img>`
+    tag / a `![alt](src)`) -- see selection_image_texture for when
+    that's possible at all. Always PNG regardless of the image's own
+    original format: a Gdk.Texture only ever holds decoded pixels, not
+    the source bytes, so there's no vector data left to hand an SVG
+    source back out even if a receiver would have preferred it.
     """
     providers = [
         Gdk.ContentProvider.new_for_value(_string_value(plain_text)),
         Gdk.ContentProvider.new_for_bytes("text/html", GLib.Bytes.new(html.encode("utf-8"))),
         Gdk.ContentProvider.new_for_bytes("text/markdown", GLib.Bytes.new(markdown.encode("utf-8"))),
     ]
+    if image_texture is not None:
+        providers.append(Gdk.ContentProvider.new_for_bytes("image/png", image_texture.save_to_png_bytes()))
     return Gdk.ContentProvider.new_union(providers)
 
 
