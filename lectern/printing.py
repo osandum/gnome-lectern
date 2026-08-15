@@ -404,14 +404,20 @@ class _Block:
         self.rule = None
         self.chips = ()
         self.chip_rgb = None
+        # 1-6 for a heading paragraph, None otherwise -- distinct from
+        # `rule`, which is only set for h1/h2 (where the bottom rule is
+        # drawn). _paginate needs every level, to keep a heading with the
+        # section it introduces rather than stranding it at a page foot.
+        self.heading_level = None
 
     @classmethod
-    def text(cls, x, layout, *, panel=None, rule=None, chips=(), chip_rgb=None):
+    def text(cls, x, layout, *, panel=None, rule=None, chips=(), chip_rgb=None, heading_level=None):
         block = cls("layout", x)
         block.layout = layout
         block.lines = _line_geometry(layout)
         block.height = (block.lines[-1][1] + block.lines[-1][2]) if block.lines else 0.0
         block.panel = panel
+        block.heading_level = heading_level
         block.rule = rule
         block.chips = chips
         block.chip_rgb = chip_rgb
@@ -563,9 +569,10 @@ def _build_blocks(context, style_table, print_model, page_width, page_height, da
                 font, leading,
             )
             run_tags = {tag for _text, tags in item.runs for tag in tags}
-            rule = heading_rule_rgb if run_tags & {"heading1", "heading2"} else None
+            heading_level = next((n for n in range(1, 7) if f"heading{n}" in run_tags), None)
+            rule = heading_rule_rgb if heading_level in (1, 2) else None
             blocks.append(_Block.text(
-                x, layout, rule=rule,
+                x, layout, rule=rule, heading_level=heading_level,
                 chips=_inline_code_spans(item), chip_rgb=code_bg_rgb,
             ))
         elif item.kind == "code-block":
@@ -614,9 +621,39 @@ def _out_of_room(y, gap, page_height):
 # follows it (#22), rather than an ordinary paragraph that just happens
 # to precede one.
 LEAD_IN_MAX_LINES = 3
+# "The first couple of lines" of the block that follows a heading (#23).
+HEADING_LOOKAHEAD_LINES = 2
 # Never place, nor strand, fewer than this many consecutive lines of a
 # wrapped paragraph at either side of a page break (#22 part 2).
 MIN_LINES_AT_BREAK = 2
+
+
+def _heading_group_height(blocks, i):
+    """Vertical room needed to keep block `i` (a heading) together with:
+    any headings immediately chained after it -- so `## A` followed by
+    `### B` moves as one unit rather than each being judged only against
+    the next block -- plus a look-ahead into whatever follows that
+    chain: a full atomic/table block (never partly shown), or the first
+    couple of lines of a paragraph/code block.
+    """
+    total = 0.0
+    j = i
+    while j < len(blocks) and blocks[j].heading_level is not None:
+        b = blocks[j]
+        total += (b.gap if j > i else 0.0) + b.height
+        if b.rule:
+            total += HEADING_RULE_PAD_PT + HEADING_RULE_WIDTH_PT
+        j += 1
+    if j < len(blocks):
+        b = blocks[j]
+        gap = b.gap if j > i else 0.0
+        if b.kind == "layout":
+            lookahead = b.lines[:HEADING_LOOKAHEAD_LINES]
+            height = (lookahead[-1][1] + lookahead[-1][2]) - lookahead[0][1] if lookahead else 0.0
+        else:
+            height = b.height
+        total += gap + height
+    return total
 
 
 def _paginate(blocks, page_height):
@@ -653,7 +690,7 @@ def _paginate(blocks, page_height):
         new_page()
         return 0.0
 
-    for block in blocks:
+    for i, block in enumerate(blocks):
         # A page break already separates a block from what came before it,
         # so the gap it was given only applies mid-page.
         gap = block.gap if current else 0.0
@@ -690,28 +727,37 @@ def _paginate(blocks, page_height):
             y += gap
             row_layouts, row_heights = block.rows
             total_rows = len(row_layouts)
-            i = 0
-            while i < len(row_layouts):
+            i2 = 0
+            while i2 < len(row_layouts):
                 rows_here, row_y = [], y
-                while i < len(row_layouts):
-                    if row_y + row_heights[i] > page_height and rows_here:
+                while i2 < len(row_layouts):
+                    if row_y + row_heights[i2] > page_height and rows_here:
                         break
                     # Global row index travels with each row (not reset
                     # per page) so _draw_entry can tell whether a given
                     # row is the table's true last row -- it draws a rule
                     # after every row except that one, to match the
                     # on-screen rules-between-rows style exactly.
-                    rows_here.append((row_layouts[i], row_y, row_heights[i], i))
-                    row_y += row_heights[i] + TABLE_ROW_GAP_PT
-                    i += 1
+                    rows_here.append((row_layouts[i2], row_y, row_heights[i2], i2))
+                    row_y += row_heights[i2] + TABLE_ROW_GAP_PT
+                    i2 += 1
                 current.append({
                     "type": "table", "x": block.x, "col_widths": block.col_widths,
                     "rows": rows_here, "total_rows": total_rows,
                 })
                 y = row_y
-                if i < len(row_layouts):
+                if i2 < len(row_layouts):
                     new_page()
         else:  # "layout": paragraph or code-block
+            if block.heading_level is not None and current:
+                # #23: look ahead through any chained headings to
+                # whatever they introduce, and break *before* the
+                # heading rather than after it if the group doesn't fit
+                # here but would fit a fresh page.
+                lookahead = _heading_group_height(blocks, i)
+                if lookahead <= page_height and y + gap + lookahead > page_height:
+                    new_page()
+                    gap = 0.0
             if current and _out_of_room(y, gap, page_height):
                 new_page()
                 gap = 0.0

@@ -1,6 +1,6 @@
-"""Pagination policy tests (#22): _paginate takes plain _Block objects
-and a page height, and needs no display -- so these build real blocks
-from real markdown (through _build_blocks, against a real
+"""Pagination policy tests (#22, #23): _paginate takes plain _Block
+objects and a page height, and needs no display -- so these build real
+blocks from real markdown (through _build_blocks, against a real
 Gtk.PrintContext from a throwaway EXPORT job) and then call _paginate
 directly with a page height chosen from the blocks' own measured
 geometry, never a guessed constant. That keeps the tests independent of
@@ -169,3 +169,52 @@ def test_a_single_line_is_not_carried_over_alone_to_a_page_head(tmp_path):
     assert len(pages[0][0]["lines"]) == 4
     assert len(pages[1][0]["lines"]) == 2
 
+
+# -- #23: keep a heading with the section it introduces ----------------------
+
+def test_heading_moves_to_a_fresh_page_with_its_section(tmp_path):
+    markdown = (
+        "".join(f"Filler paragraph {n}.\n\n" for n in range(5))
+        + "### Section\n\n" + "word " * 200 + "\n"
+    )
+    blocks = blocks_for(markdown, tmp_path)
+    fillers, heading, body = blocks[:5], blocks[5], blocks[6]
+    assert heading.heading_level == 3
+    assert body.heading_level is None and len(body.lines) >= printing.HEADING_LOOKAHEAD_LINES + 2
+
+    before_heading = cumulative_height(blocks, 5)
+    lookahead = printing._heading_group_height(blocks, 5)
+    # One point short of room for heading + lookahead -- but comfortably
+    # under what a fresh page (which doesn't carry the 5 fillers) needs.
+    page_height = before_heading + heading.gap + lookahead - 1.0
+    assert lookahead <= page_height  # sanity: the group does fit fresh
+
+    pages = printing._paginate(blocks, page_height)
+    assert len(pages) == 2
+    assert len(pages[0]) == 5
+    assert pages[1][0]["type"] == "layout"
+    assert pages[1][1]["type"] == "layout"
+    assert len(pages[1][1]["lines"]) >= printing.HEADING_LOOKAHEAD_LINES
+
+
+def test_consecutive_headings_chain_rather_than_split(tmp_path):
+    markdown = (
+        "".join(f"Filler paragraph {n}.\n\n" for n in range(5))
+        + "## A\n\n### B\n\n" + "word " * 200 + "\n"
+    )
+    blocks = blocks_for(markdown, tmp_path)
+    heading_a, heading_b, body = blocks[5], blocks[6], blocks[7]
+    assert heading_a.heading_level == 2 and heading_b.heading_level == 3
+
+    before_a = cumulative_height(blocks, 5)
+    lookahead = printing._heading_group_height(blocks, 5)
+    page_height = before_a + heading_a.gap + lookahead - 1.0
+    assert lookahead <= page_height
+
+    pages = printing._paginate(blocks, page_height)
+    assert len(pages) == 2
+    # Both headings moved together, not split across the break.
+    assert len(pages[0]) == 5
+    assert pages[1][0]["type"] == "layout"
+    assert pages[1][1]["type"] == "layout"
+    assert pages[1][2]["type"] == "layout"
