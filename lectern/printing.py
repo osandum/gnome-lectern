@@ -46,6 +46,32 @@ HEADING_RULE_PAD_PT = pt(tagdefs.HEADING_RULE_PAD)
 # image leaves room for something else rather than owning a page outright.
 IMAGE_MAX_PAGE_FRACTION = 0.9
 
+# GTK's own default page setup already gives the bottom a generous 14.2mm
+# (0.56in) -- fine as is -- but only 6.35mm (0.25in) on the other three
+# sides, which reads as "printed to the edge of the sheet". Bring those
+# three up to a plainer 10mm; bottom is deliberately left untouched.
+PAGE_MARGIN_MM = 10.0
+
+# One notch down the screen zoom ladder (zoom.py's STEPS has 0.9 right
+# below 1.0): 12pt reads comfortably on a backlit screen but heavy on
+# paper. Print gets its own constant rather than reusing zoomdefs.BASE_PT
+# so a screen-zoom change can never silently resize the printout.
+PRINT_BASE_PT = zoomdefs.BASE_PT * 0.9
+
+
+def _print_page_setup():
+    """A Gtk.PageSetup with 10mm top/left/right margins, GTK's own default
+    left in place for the bottom. Used as the operation's default so it
+    still shows up, editable, in the print dialog's "Page Setup" tab --
+    and so `Gtk.PrintContext.get_width/height` already return the reduced
+    text column by the time `_on_begin_print` sees them."""
+    setup = Gtk.PageSetup()
+    setup.set_top_margin(PAGE_MARGIN_MM, Gtk.Unit.MM)
+    setup.set_left_margin(PAGE_MARGIN_MM, Gtk.Unit.MM)
+    setup.set_right_margin(PAGE_MARGIN_MM, Gtk.Unit.MM)
+    return setup
+
+
 # Only run-level (character-range) properties translate to Pango
 # attributes; margins/backgrounds/pixel-spacing are block-level concerns
 # handled by this module's own layout math instead.
@@ -101,7 +127,7 @@ def _base_font():
         substitute = next((f for f in _STATIC_FONT_FALLBACKS if f in families), None)
         if substitute is not None:
             desc.set_family(substitute)
-    desc.set_size(int(zoomdefs.BASE_PT * Pango.SCALE))
+    desc.set_size(int(PRINT_BASE_PT * Pango.SCALE))
     return desc
 
 
@@ -130,7 +156,7 @@ def _run_font(base, run_props):
                 desc.set_style(value)
             elif prop == "family":
                 desc.set_family(value)
-    desc.set_size(int(round(zoomdefs.BASE_PT * scale * Pango.SCALE)))
+    desc.set_size(int(round(PRINT_BASE_PT * scale * Pango.SCALE)))
     return desc
 
 
@@ -261,7 +287,7 @@ def _leading_pt(context, font):
     _base_font), so the two fonts differ and so does their leading."""
     metrics = context.create_pango_layout().get_context().get_metrics(font, None)
     natural = (metrics.get_ascent() + metrics.get_descent()) / Pango.SCALE
-    return pt(tagdefs.line_leading(zoomdefs.BASE_PT * 96 / 72, natural / PX_TO_PT))
+    return pt(tagdefs.line_leading(PRINT_BASE_PT * 96 / 72, natural / PX_TO_PT))
 
 
 def _build_text_layout(context, style_table, item, width_pt, hanging_pt=0.0,
@@ -836,6 +862,7 @@ class PrintCoordinator:
                         action=Gtk.PrintOperationAction.PRINT_DIALOG, export_path=None):
         op = Gtk.PrintOperation()
         op.set_job_name(title)
+        op.set_default_page_setup(_print_page_setup())
         if export_path:
             op.set_export_filename(export_path)
         state = {}
