@@ -10,6 +10,7 @@ lengths are computed explicitly throughout rather than assumed to match
 `len(text)`.
 """
 import math
+from pathlib import PurePath
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -1021,6 +1022,15 @@ class PrintCoordinator:
         op = Gtk.PrintOperation()
         op.set_job_name(file_name)
         op.set_default_page_setup(_print_page_setup())
+        # "Print to File" otherwise suggests a bare "output.pdf"
+        # (gtkprintbackendfile.c falls back to that literal string when
+        # this key is unset) -- job_name above has no bearing on it, that
+        # only names the job, not the file. Stem of the source file's own
+        # name, not doc_title: a document can have several h1-derived
+        # titles across edits, but only one file name.
+        settings = Gtk.PrintSettings()
+        settings.set(Gtk.PRINT_SETTINGS_OUTPUT_BASENAME, PurePath(file_name).stem)
+        op.set_print_settings(settings)
         if export_path:
             op.set_export_filename(export_path)
         state = {"header_footer": header_footer, "header_left": _header_left_text(doc_title, file_name)}

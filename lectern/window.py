@@ -273,7 +273,11 @@ class LecternWindow(Adw.ApplicationWindow):
         doc_title = self._document.title if self._document else None
         header_footer = self.lookup_action("print-header-footer").get_state().get_boolean()
         coordinator.print_document(
-            self, self._renderer.print_model, self._style_manager.get_dark(), doc_title, file_name,
+            # Paper is white regardless of the desktop theme, so print
+            # always renders in the light palette -- following the app's
+            # live dark-mode state here left code-block/diagram
+            # backgrounds and heading rules dark on a white page.
+            self, self._renderer.print_model, False, doc_title, file_name,
             header_footer=header_footer,
         )
 
