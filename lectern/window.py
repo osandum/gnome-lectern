@@ -251,10 +251,11 @@ class LecternWindow(Adw.ApplicationWindow):
         # (and most modern Wayland) desktops, which flatly refuses to host
         # an app-supplied custom widget ("create-custom-widget not
         # supported with portal") -- so the toggle has to live in Lectern's
-        # own UI instead. In-memory only: it resets to off on relaunch
-        # rather than persisting via GSettings.
+        # own UI instead. Defaults on: most people printing a document want
+        # to know which page they're holding. In-memory only for now --
+        # resets to this default on relaunch rather than persisting.
         header_footer_action = Gio.SimpleAction.new_stateful(
-            "print-header-footer", None, GLib.Variant.new_boolean(False)
+            "print-header-footer", None, GLib.Variant.new_boolean(True)
         )
         header_footer_action.connect("change-state", self._action_toggle_header_footer)
         self.add_action(header_footer_action)
