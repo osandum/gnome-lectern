@@ -122,7 +122,7 @@ cp -r contrib/claude-code/skills/open-with-lectern ~/.claude/skills/
 
 ## Status
 
-v0.2.0. Known scope cuts: table column widths are a simple
+Known scope cuts: table column widths are a simple
 median-character-count heuristic rather than true
 text-measurement-based sizing, mermaid support is a deliberate subset
 (the layout is a cut-down dagre rather than the real one), highlighting
