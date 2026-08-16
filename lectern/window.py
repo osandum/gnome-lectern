@@ -16,6 +16,7 @@ from .zoom import ZoomController
 from .filewatch import FileWatcher
 from .printing import PrintCoordinator
 from .decorated_textview import DecoratedTextView
+from . import sticky_settings
 
 
 class LecternWindow(Adw.ApplicationWindow):
@@ -251,9 +252,10 @@ class LecternWindow(Adw.ApplicationWindow):
         # (and most modern Wayland) desktops, which flatly refuses to host
         # an app-supplied custom widget ("create-custom-widget not
         # supported with portal") -- so the toggle has to live in Lectern's
-        # own UI instead. Defaults on: most people printing a document want
-        # to know which page they're holding. In-memory only for now --
-        # resets to this default on relaunch rather than persisting.
+        # own UI instead. Defaults on here (most people printing a document
+        # want to know which page they're holding); _open_file overrides
+        # this with whatever was last set for this document, if anything
+        # was (see sticky_settings).
         header_footer_action = Gio.SimpleAction.new_stateful(
             "print-header-footer", None, GLib.Variant.new_boolean(True)
         )
@@ -265,6 +267,11 @@ class LecternWindow(Adw.ApplicationWindow):
 
     def _action_toggle_header_footer(self, action, value):
         action.set_state(value)
+        key = sticky_settings.key_for(
+            self._document.title if self._document else None,
+            self._document.basename if self._document else None,
+        )
+        sticky_settings.set_sticky(key, "header_footer", value.get_boolean())
 
     def _action_print(self, action, param):
         if self._renderer is None:
@@ -528,6 +535,13 @@ class LecternWindow(Adw.ApplicationWindow):
         except DocumentLoadError as ex:
             self._show_load_error(str(ex))
             return
+        # Once only, on the initial open -- not in _render_document, which
+        # also runs on every reload, so a live-edited file changing its
+        # own title mid-session can't flip the checkbox out from under
+        # whatever the reader already chose for this window.
+        key = sticky_settings.key_for(self._document.title, self._document.basename)
+        header_footer = sticky_settings.get_sticky(key, "header_footer", True)
+        self.lookup_action("print-header-footer").set_state(GLib.Variant.new_boolean(header_footer))
         self._content_overlay.set_child(self._scrolled)
         self._window_title.set_title(self._document.basename)
         self._window_title.set_subtitle(self._document.parent_path or "")
