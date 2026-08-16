@@ -48,11 +48,28 @@ HEADING_RULE_PAD_PT = pt(tagdefs.HEADING_RULE_PAD)
 # image leaves room for something else rather than owning a page outright.
 IMAGE_MAX_PAGE_FRACTION = 0.9
 
-# GTK's own default page setup already gives the bottom a generous 14.2mm
-# (0.56in) -- fine as is -- but only 6.35mm (0.25in) on the other three
+# GTK's own default page setup already gives the bottom a generous ~40pt
+# (0.56in) -- fine as is -- but only ~18pt (0.25in) on the other three
 # sides, which reads as "printed to the edge of the sheet". Bring those
-# three up to a plainer 10mm; bottom is deliberately left untouched.
-PAGE_MARGIN_MM = 10.0
+# three up to a plainer 28pt (~10mm); bottom is deliberately left
+# untouched. Everything here is in points, like the rest of this module
+# (see PX_TO_PT above) -- Gtk.PageSetup takes points just as natively as
+# mm or inches, so there's no reason for page-setup margins to be the one
+# thing in this file measured in a different unit.
+PAGE_MARGIN_PT = 28.0
+# A further 28pt (~10mm) on top of that, left only -- right gets its own
+# smaller, 14pt (~5mm) bump instead. Kept as separate constants rather
+# than folded into PAGE_MARGIN_PT so each side's extra stays visible at
+# its own call site.
+LEFT_EXTRA_MARGIN_PT = 28.0
+RIGHT_EXTRA_MARGIN_PT = 14.0
+# With the footer on, its line otherwise sits flush against the last line
+# of body content -- there's nowhere else to put its clearance, since
+# FOOTER_TEXT_TOP_PT is the entire gap between them regardless of how big
+# FOOTER_BAND_PT is. Taken out of the bottom margin instead of added on
+# top, so the footer doesn't just end up with more empty paper below it
+# too. Only applies when there's a footer to make room for.
+FOOTER_MARGIN_SHIFT_PT = 14.0
 
 # One notch down the screen zoom ladder (zoom.py's STEPS has 0.9 right
 # below 1.0): 12pt reads comfortably on a backlit screen but heavy on
@@ -61,16 +78,21 @@ PAGE_MARGIN_MM = 10.0
 PRINT_BASE_PT = zoomdefs.BASE_PT * 0.9
 
 
-def _print_page_setup():
-    """A Gtk.PageSetup with 10mm top/left/right margins, GTK's own default
-    left in place for the bottom. Used as the operation's default so it
-    still shows up, editable, in the print dialog's "Page Setup" tab --
-    and so `Gtk.PrintContext.get_width/height` already return the reduced
-    text column by the time `_on_begin_print` sees them."""
+def _print_page_setup(header_footer=False):
+    """A Gtk.PageSetup with 56pt left, 42pt right, 28pt top, and GTK's own
+    default bottom margin -- minus FOOTER_MARGIN_SHIFT_PT when there's a
+    footer to make room for, untouched otherwise. Used as the operation's
+    default so it still shows up, editable, in the print dialog's "Page
+    Setup" tab -- and so `Gtk.PrintContext.get_width/height` already
+    return the reduced text column by the time `_on_begin_print` sees
+    them."""
     setup = Gtk.PageSetup()
-    setup.set_top_margin(PAGE_MARGIN_MM, Gtk.Unit.MM)
-    setup.set_left_margin(PAGE_MARGIN_MM, Gtk.Unit.MM)
-    setup.set_right_margin(PAGE_MARGIN_MM, Gtk.Unit.MM)
+    setup.set_top_margin(PAGE_MARGIN_PT, Gtk.Unit.POINTS)
+    setup.set_left_margin(PAGE_MARGIN_PT + LEFT_EXTRA_MARGIN_PT, Gtk.Unit.POINTS)
+    setup.set_right_margin(PAGE_MARGIN_PT + RIGHT_EXTRA_MARGIN_PT, Gtk.Unit.POINTS)
+    if header_footer:
+        default_bottom = Gtk.PageSetup().get_bottom_margin(Gtk.Unit.POINTS)
+        setup.set_bottom_margin(default_bottom - FOOTER_MARGIN_SHIFT_PT, Gtk.Unit.POINTS)
     return setup
 
 
@@ -960,9 +982,21 @@ def _draw_entry(cr, entry, page_width):
 HEADER_FOOTER_FONT_PT = 9.0
 HEADER_FOOTER_RGB = (0.45, 0.45, 0.45)
 HEADER_BAND_PT = 24.0
-FOOTER_BAND_PT = 20.0
 HEADER_TEXT_TOP_PT = 4.0
-FOOTER_TEXT_TOP_PT = 4.0
+# Body content otherwise starts right at the top page margin (no header)
+# or right after the header band (with one) -- both read as a bit tight.
+# Unlike FOOTER_MARGIN_SHIFT_PT below, this isn't funded by trimming the
+# top page margin: it's a plain addition, present either way.
+BODY_TOP_MARGIN_PT = 14.0
+# The gap between the last line of body content and the footer text is
+# exactly FOOTER_TEXT_TOP_PT, whatever FOOTER_BAND_PT is -- body content
+# always fills right up to the top of the footer band. So both need to
+# grow by the same FOOTER_MARGIN_SHIFT_PT (funded by _print_page_setup's
+# matching cut to the bottom page margin) for that shift to land as
+# clearance above the footer rather than just moving the whole band, and
+# the footer with it, further from the page's true bottom edge.
+FOOTER_BAND_PT = 20.0 + FOOTER_MARGIN_SHIFT_PT
+FOOTER_TEXT_TOP_PT = 4.0 + FOOTER_MARGIN_SHIFT_PT
 
 
 def _header_footer_font():
@@ -1021,7 +1055,7 @@ class PrintCoordinator:
         # instead.
         op = Gtk.PrintOperation()
         op.set_job_name(file_name)
-        op.set_default_page_setup(_print_page_setup())
+        op.set_default_page_setup(_print_page_setup(header_footer))
         # "Print to File" otherwise suggests a bare "output.pdf"
         # (gtkprintbackendfile.c falls back to that literal string when
         # this key is unset) -- job_name above has no bearing on it, that
@@ -1043,10 +1077,12 @@ class PrintCoordinator:
         width, height = context.get_width(), context.get_height()
         header_band = HEADER_BAND_PT if state["header_footer"] else 0.0
         footer_band = FOOTER_BAND_PT if state["header_footer"] else 0.0
-        body_height = height - header_band - footer_band
+        body_top = header_band + BODY_TOP_MARGIN_PT
+        body_height = height - body_top - footer_band
         state["width"] = width
         state["height"] = height
         state["header_band"] = header_band
+        state["body_top"] = body_top
         blocks = _build_blocks(context, style_table, print_model, width, body_height, dark)
         # Pango.LayoutLine keeps only a *weak* back-reference to its parent
         # Pango.Layout -- without this, `blocks` (and therefore every
@@ -1059,9 +1095,8 @@ class PrintCoordinator:
 
     def _on_draw_page(self, op, context, page_nr, state):
         cr = context.get_cairo_context()
-        header_band = state["header_band"]
         cr.save()
-        cr.translate(0, header_band)
+        cr.translate(0, state["body_top"])
         for entry in state["pages"][page_nr]:
             _draw_entry(cr, entry, state["width"])
         cr.restore()

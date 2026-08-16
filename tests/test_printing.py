@@ -36,7 +36,7 @@ def run_export(print_model, tmp_path, header_footer, doc_title="Hello", file_nam
     the pipeline actually computed."""
     coordinator = printing.PrintCoordinator()
     op = Gtk.PrintOperation()
-    op.set_default_page_setup(printing._print_page_setup())
+    op.set_default_page_setup(printing._print_page_setup(header_footer))
     op.set_export_filename(str(tmp_path / "out.pdf"))
     state = {
         "header_footer": header_footer,
@@ -58,17 +58,30 @@ def test_print_base_font_is_one_zoom_notch_below_screen_size():
     assert printing.PRINT_BASE_PT == pytest.approx(10.8)
 
 
-def test_page_setup_adds_margin_on_three_sides_only():
+def test_page_setup_adds_margin_asymmetrically():
     setup = printing._print_page_setup()
-    assert setup.get_top_margin(Gtk.Unit.MM) == pytest.approx(printing.PAGE_MARGIN_MM)
-    assert setup.get_left_margin(Gtk.Unit.MM) == pytest.approx(printing.PAGE_MARGIN_MM)
-    assert setup.get_right_margin(Gtk.Unit.MM) == pytest.approx(printing.PAGE_MARGIN_MM)
-    # Bottom is untouched -- GTK's own default is already generous (more
-    # than the 10mm added elsewhere), and the issue is explicit that it
-    # should not be applied symmetrically.
-    default_bottom = Gtk.PageSetup().get_bottom_margin(Gtk.Unit.MM)
-    assert setup.get_bottom_margin(Gtk.Unit.MM) == pytest.approx(default_bottom)
-    assert setup.get_bottom_margin(Gtk.Unit.MM) > printing.PAGE_MARGIN_MM
+    assert setup.get_top_margin(Gtk.Unit.POINTS) == pytest.approx(printing.PAGE_MARGIN_PT)
+    assert setup.get_left_margin(Gtk.Unit.POINTS) == pytest.approx(
+        printing.PAGE_MARGIN_PT + printing.LEFT_EXTRA_MARGIN_PT)
+    assert setup.get_right_margin(Gtk.Unit.POINTS) == pytest.approx(
+        printing.PAGE_MARGIN_PT + printing.RIGHT_EXTRA_MARGIN_PT)
+    # Bottom is untouched without a footer -- GTK's own default is
+    # already generous (more than the 28pt added elsewhere), and the
+    # issue is explicit that it should not be applied symmetrically.
+    default_bottom = Gtk.PageSetup().get_bottom_margin(Gtk.Unit.POINTS)
+    assert setup.get_bottom_margin(Gtk.Unit.POINTS) == pytest.approx(default_bottom)
+    assert setup.get_bottom_margin(Gtk.Unit.POINTS) > printing.PAGE_MARGIN_PT
+
+
+def test_page_setup_trims_bottom_margin_for_footer():
+    """With a footer on, the bottom margin gives up FOOTER_MARGIN_SHIFT_PT
+    -- that's the clearance _on_begin_print puts above the footer line
+    instead (see FOOTER_BAND_PT/FOOTER_TEXT_TOP_PT), not extra blank
+    paper at the very edge."""
+    plain = printing._print_page_setup(header_footer=False)
+    decorated = printing._print_page_setup(header_footer=True)
+    assert decorated.get_bottom_margin(Gtk.Unit.POINTS) == pytest.approx(
+        plain.get_bottom_margin(Gtk.Unit.POINTS) - printing.FOOTER_MARGIN_SHIFT_PT)
 
 
 def test_print_document_exports_successfully(tmp_path):
@@ -133,11 +146,24 @@ def test_header_footer_is_off_unless_explicitly_turned_on(tmp_path):
     assert state["header_band"] == 0.0
 
 
+def test_body_top_margin_applies_with_or_without_a_header(tmp_path):
+    """BODY_TOP_MARGIN_PT is a plain addition on top of the header band --
+    present either way, unlike FOOTER_MARGIN_SHIFT_PT which only kicks in
+    with a footer."""
+    print_model = print_model_for("# Hello\n\nSome text.\n")
+    plain = run_export(print_model, tmp_path, header_footer=False)
+    decorated = run_export(print_model, tmp_path, header_footer=True)
+    assert plain["body_top"] == pytest.approx(printing.BODY_TOP_MARGIN_PT)
+    assert decorated["body_top"] == pytest.approx(printing.HEADER_BAND_PT + printing.BODY_TOP_MARGIN_PT)
+
+
 def test_header_footer_claims_room_from_the_body_not_the_paper(tmp_path):
-    """Enabling the header/footer must not shrink the page itself (that's
-    #13's job) -- it takes its space out of the body height that
-    _paginate sees, which is why the same content needs at least as many
-    pages once it's on."""
+    """Enabling the header/footer must not shrink the *body* height (that's
+    #13's job) -- printable height grows by FOOTER_MARGIN_SHIFT_PT (the
+    matching cut to the bottom page margin, see _print_page_setup), and
+    FOOTER_BAND_PT grows by exactly that much too, so the two cancel out
+    and body content still gets the same room it always did -- which is
+    why the same content needs at least as many pages once it's on."""
     markdown = "# Hello\n\n" + "more text. " * 500 + "\n"
     print_model = print_model_for(markdown)
     plain = run_export(print_model, tmp_path, header_footer=False)
@@ -145,6 +171,16 @@ def test_header_footer_claims_room_from_the_body_not_the_paper(tmp_path):
     assert plain["header_band"] == 0.0
     assert decorated["header_band"] == pytest.approx(printing.HEADER_BAND_PT)
     assert plain["width"] == decorated["width"]
-    assert plain["height"] == decorated["height"]
+    assert decorated["height"] == pytest.approx(
+        plain["height"] + printing.FOOTER_MARGIN_SHIFT_PT)
     assert len(decorated["pages"]) >= len(plain["pages"])
     assert len(decorated["pages"]) > 1
+
+
+def test_footer_gap_above_is_shifted_by_the_full_margin_amount():
+    """FOOTER_TEXT_TOP_PT is the entire gap between body content's last
+    line and the footer text, whatever FOOTER_BAND_PT is (see the comment
+    above both) -- so the fix has to show up here, not just as a bigger
+    band."""
+    assert printing.FOOTER_TEXT_TOP_PT == pytest.approx(4.0 + printing.FOOTER_MARGIN_SHIFT_PT)
+    assert printing.FOOTER_BAND_PT == pytest.approx(20.0 + printing.FOOTER_MARGIN_SHIFT_PT)
