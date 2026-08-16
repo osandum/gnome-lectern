@@ -79,6 +79,26 @@
   </requires>
 
   <releases>
+    <release version="0.3.1" date="2026-08-16">
+      <description>
+        <p>
+          Printing now always uses a light color scheme, regardless of
+          the desktop's dark mode, so code blocks and diagrams no longer
+          come out with dark backgrounds on a white page. Page margins
+          are wider and asymmetric, and the header/footer option — now on
+          by default — leaves proper clearance around the page number and
+          running head instead of sitting flush against the text.
+        </p>
+        <p>
+          "Print to File" now suggests the document's own file name
+          instead of a generic "output.pdf", and the header/footer
+          preference is remembered per document across restarts.
+        </p>
+        <p>
+          Fedora packages are now available via COPR.
+        </p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-08-15">
       <description>
         <p>
