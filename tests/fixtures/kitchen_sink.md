@@ -209,6 +209,25 @@ flowchart TD
     Changed -->|no| Watch
 ```
 
+Nested `subgraph` frames, labels broken over two lines with `\n`, and an
+invisible `~~~` link placing a node nothing points at:
+
+```mermaid
+flowchart TD
+    Source["Markdown\nsource"] --> Walk{Node type?}
+    subgraph Pass["One walk, two outputs"]
+        subgraph Screen["Screen"]
+            Buffer[(TextBuffer)]
+        end
+        subgraph Paper["Paper"]
+            Model["print_model\nPrintItem list"]
+        end
+    end
+    Walk --> Buffer
+    Walk --> Model
+    Model ~~~ Note["Same walk, same order"]
+```
+
 A sequence diagram, with a frame and a note:
 
 ```mermaid
